@@ -49,6 +49,7 @@ use std::sync::Arc;
 use subspace_networking::libp2p::identity;
 use subspace_runtime_primitives::opaque::Block as PBlock;
 use subspace_service::{DsnConfig, SubspaceNetworking};
+use subspace_test_service::mock::MockPrimaryNode;
 use substrate_test_client::{
     BlockchainEventsExt, RpcHandlersExt, RpcTransactionError, RpcTransactionOutput,
 };
@@ -248,6 +249,95 @@ async fn run_executor(
     ))
 }
 
+#[sc_tracing::logging::prefix_logs_with(system_domain_config.network.node_name.as_str())]
+async fn run_executor_with_mock(
+    system_domain_config: ServiceConfiguration,
+    primary_chain_mock_node: &MockPrimaryNode,
+) -> sc_service::error::Result<(
+    TaskManager,
+    Arc<Client>,
+    Arc<Backend>,
+    Arc<CodeExecutor>,
+    Arc<NetworkService<Block, H256>>,
+    RpcHandlers,
+    Executor,
+)> {
+    let (gossip_msg_sink, gossip_msg_stream) =
+        sc_utils::mpsc::tracing_unbounded("cross_domain_gossip_messages", 100);
+    let system_domain_config = DomainConfiguration {
+        service_config: system_domain_config,
+        maybe_relayer_id: None,
+    };
+    let block_import_throttling_buffer_size = 10;
+    let system_domain_node = domain_service::new_full_system::<
+        _,
+        _,
+        _,
+        _,
+        _,
+        domain_test_runtime::RuntimeApi,
+        RuntimeExecutor,
+    >(
+        system_domain_config,
+        primary_chain_mock_node.client.clone(),
+        MockPrimaryNode::sync_oracle(),
+        &primary_chain_mock_node.select_chain,
+        primary_chain_mock_node
+            .imported_block_notification_stream
+            .subscribe()
+            .then(|imported_block_notification| async move {
+                (
+                    imported_block_notification.block_number,
+                    imported_block_notification.fork_choice,
+                    imported_block_notification.block_import_acknowledgement_sender,
+                )
+            }),
+        primary_chain_mock_node
+            .new_slot_notification_stream
+            .subscribe(),
+        block_import_throttling_buffer_size,
+        gossip_msg_sink,
+    )
+    .await?;
+
+    let domain_service::NewFullSystem {
+        task_manager,
+        client,
+        backend,
+        code_executor,
+        network,
+        network_starter,
+        rpc_handlers,
+        executor,
+        tx_pool_sink,
+    } = system_domain_node;
+
+    let mut domain_tx_pool_sinks = BTreeMap::new();
+    domain_tx_pool_sinks.insert(DomainId::SYSTEM, tx_pool_sink);
+    let cross_domain_message_gossip_worker =
+        GossipWorker::<Block>::new(network.clone(), domain_tx_pool_sinks);
+
+    task_manager
+        .spawn_essential_handle()
+        .spawn_essential_blocking(
+            "cross-domain-gossip-message-worker",
+            None,
+            Box::pin(cross_domain_message_gossip_worker.run(gossip_msg_stream)),
+        );
+
+    network_starter.start_network();
+
+    Ok((
+        task_manager,
+        client,
+        backend,
+        code_executor,
+        network,
+        rpc_handlers,
+        executor,
+    ))
+}
+
 /// A Cumulus test node instance used for testing.
 pub struct SystemDomainNode {
     /// TaskManager's instance.
@@ -389,6 +479,43 @@ impl SystemDomainNodeBuilder {
         let multiaddr = system_domain_config.network.listen_addresses[0].clone();
         let (task_manager, client, backend, code_executor, network, rpc_handlers, executor) =
             run_executor(system_domain_config, primary_chain_config)
+                .await
+                .expect("could not start system domain node");
+
+        let peer_id = network.local_peer_id();
+        let addr = MultiaddrWithPeerId { multiaddr, peer_id };
+
+        SystemDomainNode {
+            task_manager,
+            client,
+            backend,
+            code_executor,
+            network,
+            addr,
+            rpc_handlers,
+            executor,
+        }
+    }
+
+    /// Build the [`SystemDomainNode`].
+    pub async fn build_with_mock(
+        self,
+        role: Role,
+        primary_chain_mock_node: &MockPrimaryNode,
+    ) -> SystemDomainNode {
+        let system_domain_config = node_config(
+            self.tokio_handle.clone(),
+            self.key,
+            self.system_domain_nodes,
+            self.system_domain_nodes_exclusive,
+            role,
+            BasePath::new(self.base_path.path().join("system")),
+        )
+        .expect("could not generate system domain node Configuration");
+
+        let multiaddr = system_domain_config.network.listen_addresses[0].clone();
+        let (task_manager, client, backend, code_executor, network, rpc_handlers, executor) =
+            run_executor_with_mock(system_domain_config, primary_chain_mock_node)
                 .await
                 .expect("could not start system domain node");
 
@@ -612,4 +739,16 @@ pub async fn run_primary_chain_validator_node(
         base_path,
     )
     .await
+}
+
+pub async fn run_mock_primary_chain_validator_node(
+    tokio_handle: tokio::runtime::Handle,
+    key: Sr25519Keyring,
+    base_path: BasePath,
+) -> subspace_test_service::mock::MockPrimaryNode {
+    subspace_test_service::mock::MockPrimaryNode::run_mock_primary_node(
+        tokio_handle,
+        key,
+        base_path,
+    )
 }
