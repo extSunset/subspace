@@ -56,6 +56,8 @@ use substrate_test_client::{
     BlockchainEventsExt, RpcHandlersExt, RpcTransactionError, RpcTransactionOutput,
 };
 
+pub mod mock;
+
 /// Create a Subspace `Configuration`.
 ///
 /// By default an in-memory socket will be used, therefore you need to provide boot
