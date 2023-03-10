@@ -21,7 +21,6 @@ frame-system = { git = "https://github.com/subspace/substrate", rev = "456cfad45
 futures = "0.3.26"
 futures-timer = "3.0.1"
 rand = "0.8.5"
-parking_lot = "0.12.1"
 pallet-balances = { git = "https://github.com/subspace/substrate", rev = "456cfad45a178617f6886ec400c312f2fea59232" }
 pallet-transaction-payment = { git = "https://github.com/subspace/substrate", rev = "456cfad45a178617f6886ec400c312f2fea59232" }
 sc-client-api = { git = "https://github.com/subspace/substrate", rev = "456cfad45a178617f6886ec400c312f2fea59232" }
@@ -36,16 +35,17 @@ sc-network-common = { git = "https://github.com/subspace/substrate", rev = "456c
 sc-service = { git = "https://github.com/subspace/substrate", rev = "456cfad45a178617f6886ec400c312f2fea59232", default-features = false }
 sc-tracing = { git = "https://github.com/subspace/substrate", rev = "456cfad45a178617f6886ec400c312f2fea59232" }
 sp-api = { version = "4.0.0-dev", git = "https://github.com/subspace/substrate", rev = "456cfad45a178617f6886ec400c312f2fea59232" }
+sp-application-crypto = { git = "https://github.com/subspace/substrate", rev = "456cfad45a178617f6886ec400c312f2fea59232" }
 sp-arithmetic = { git = "https://github.com/subspace/substrate", rev = "456cfad45a178617f6886ec400c312f2fea59232" }
 sp-blockchain = { git = "https://github.com/subspace/substrate", rev = "456cfad45a178617f6886ec400c312f2fea59232" }
 sp-consensus = { git = "https://github.com/subspace/substrate", rev = "456cfad45a178617f6886ec400c312f2fea59232" }
 sp-consensus-subspace = { version = "0.1.0", path = "../../crates/sp-consensus-subspace" }
 sp-consensus-slots = { version = "0.10.0-dev", default-features = false, git = "https://github.com/subspace/substrate", rev = "456cfad45a178617f6886ec400c312f2fea59232" }
-sp-core = { version = "7.0.0", git = "https://github.com/subspace/substrate", rev = "456cfad45a178617f6886ec400c312f2fea59232" }
-sp-domains = { path = "../../crates/sp-domains" }
 sp-keyring = { git = "https://github.com/subspace/substrate", rev = "456cfad45a178617f6886ec400c312f2fea59232" }
-sp-transaction-pool = { version = "4.0.0-dev", git = "https://github.com/subspace/substrate", rev = "456cfad45a178617f6886ec400c312f2fea59232" }
+sp-timestamp = { version = "4.0.0-dev", git = "https://github.com/subspace/substrate", rev = "456cfad45a178617f6886ec400c312f2fea59232" }
+sp-inherents = { version = "4.0.0-dev", git = "https://github.com/subspace/substrate", rev = "456cfad45a178617f6886ec400c312f2fea59232" }
 sp-runtime = { git = "https://github.com/subspace/substrate", rev = "456cfad45a178617f6886ec400c312f2fea59232" }
+subspace-solving = { version = "0.1.0", default-features = false, path = "../../crates/subspace-solving" }
 subspace-core-primitives = { version = "0.1.0", default-features = false, path = "../../crates/subspace-core-primitives" }
 subspace-fraud-proof = { path = "../../crates/subspace-fraud-proof" }
 subspace-networking = { path = "../../crates/subspace-networking" }

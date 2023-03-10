@@ -1,7 +1,6 @@
 use crate::node_config;
 use futures::channel::mpsc;
 use futures::{select, FutureExt, StreamExt};
-use parking_lot::Mutex;
 use sc_block_builder::BlockBuilderProvider;
 use sc_client_api::backend;
 use sc_consensus::block_import::{
@@ -15,24 +14,29 @@ use sc_consensus_subspace::ImportedBlockNotification;
 use sc_executor::NativeElseWasmExecutor;
 use sc_service::{BasePath, InPoolTransaction, TaskManager, TransactionPool};
 use sp_api::{ApiExt, HashT, HeaderT, ProvideRuntimeApi, TransactionFor};
+use sp_application_crypto::UncheckedFrom;
 use sp_blockchain::HeaderBackend;
 use sp_consensus::{BlockOrigin, CacheKeyId, Error as ConsensusError, NoNetwork, SyncOracle};
 use sp_consensus_slots::Slot;
-use sp_core::traits::SpawnEssentialNamed;
+use sp_consensus_subspace::digests::{CompatibleDigestItem, PreDigest};
+use sp_consensus_subspace::FarmerPublicKey;
+use sp_inherents::{InherentData, InherentDataProvider};
 use sp_keyring::Sr25519Keyring;
 use sp_runtime::generic::{BlockId, Digest};
 use sp_runtime::traits::{BlakeTwo256, Block as BlockT, NumberFor};
+use sp_runtime::DigestItem;
+use sp_timestamp::Timestamp;
 use std::collections::HashMap;
 use std::error::Error;
 use std::sync::Arc;
 use std::time;
-use std::time::Duration;
-use subspace_core_primitives::Blake2b256Hash;
+use subspace_core_primitives::{Blake2b256Hash, Solution};
 use subspace_runtime_primitives::opaque::Block;
-use subspace_runtime_primitives::Hash;
+use subspace_runtime_primitives::{AccountId, Hash};
 use subspace_service::FullSelectChain;
+use subspace_solving::create_chunk_signature;
 use subspace_test_client::{Backend, Client, FraudProofVerifier, TestExecutorDispatch};
-use subspace_test_runtime::RuntimeApi;
+use subspace_test_runtime::{RuntimeApi, SLOT_DURATION};
 use subspace_transaction_pool::bundle_validator::BundleValidator;
 use subspace_transaction_pool::FullPool;
 
@@ -40,7 +44,7 @@ type StorageChanges = sp_api::StorageChanges<backend::StateBackendFor<Backend, B
 
 pub struct MockPrimaryNode {
     /// `TaskManager`'s instance.
-    pub task_manager: Arc<Mutex<TaskManager>>,
+    pub task_manager: TaskManager,
     /// Client's instance.
     pub client: Arc<Client>,
     /// Backend.
@@ -58,9 +62,9 @@ pub struct MockPrimaryNode {
     pub imported_block_notification_stream:
         SubspaceNotificationStream<ImportedBlockNotification<Block>>,
 
-    pub new_slot_notification_sender: SubspaceNotificationSender<(Slot, Blake2b256Hash)>,
+    pub manual_slot: ManualSlot,
 
-    pub new_slot_notification_stream: SubspaceNotificationStream<(Slot, Blake2b256Hash)>,
+    genesis_solution: Solution<FarmerPublicKey, AccountId>,
 }
 
 impl MockPrimaryNode {
@@ -114,11 +118,19 @@ impl MockPrimaryNode {
             imported_block_notification_sender,
         ));
 
-        let (new_slot_notification_sender, new_slot_notification_stream) =
-            notification::channel("subspace_new_slot_notification_stream");
+        let manual_slot = ManualSlot::new();
+
+        let genesis_solution = {
+            let mut gs = Solution::genesis_solution(
+                FarmerPublicKey::unchecked_from(key.public().0),
+                key.to_account_id(),
+            );
+            gs.chunk_signature = create_chunk_signature(key.pair().as_ref(), &gs.chunk.to_bytes());
+            gs
+        };
 
         MockPrimaryNode {
-            task_manager: Arc::new(Mutex::new(task_manager)),
+            task_manager,
             client,
             backend,
             executor,
@@ -126,8 +138,8 @@ impl MockPrimaryNode {
             block_import,
             select_chain,
             imported_block_notification_stream,
-            new_slot_notification_sender,
-            new_slot_notification_stream,
+            manual_slot,
+            genesis_solution,
         }
     }
 
@@ -140,7 +152,7 @@ impl MockPrimaryNode {
         parent_number: NumberFor<Block>,
     ) -> Vec<<Block as BlockT>::Extrinsic> {
         let mut t1 = self.transaction_pool.ready_at(parent_number).fuse();
-        let mut t2 = futures_timer::Delay::new(time::Duration::from_micros(100)).fuse();
+        let mut t2 = futures_timer::Delay::new(time::Duration::from_millis(5)).fuse();
         let pending_iterator = select! {
             res = t1 => res,
             _ = t2 => {
@@ -152,7 +164,7 @@ impl MockPrimaryNode {
             }
         };
         // TODO: limit the number of txn
-        let pushing_duration = time::Duration::from_micros(500);
+        let pushing_duration = time::Duration::from_millis(1);
         let start = time::Instant::now();
         let mut extrinsics = Vec::new();
         for pending_tx in pending_iterator {
@@ -165,20 +177,50 @@ impl MockPrimaryNode {
         extrinsics
     }
 
+    async fn mock_inherent_data(slot: Slot) -> Result<InherentData, Box<dyn Error>> {
+        let timestamp = sp_timestamp::InherentDataProvider::new(Timestamp::new(
+            <Slot as Into<u64>>::into(slot) * SLOT_DURATION,
+        ));
+        let subspace_inherents =
+            sp_consensus_subspace::inherents::InherentDataProvider::new(slot, vec![]);
+
+        let inherent_data = (subspace_inherents, timestamp)
+            .create_inherent_data()
+            .await?;
+
+        Ok(inherent_data)
+    }
+
+    fn mock_subspace_digest(&self, slot: Slot) -> Digest {
+        let pre_digest: PreDigest<FarmerPublicKey, AccountId> = PreDigest {
+            slot,
+            solution: self.genesis_solution.clone(),
+        };
+        let mut digest = Digest::default();
+        digest.push(DigestItem::subspace_pre_digest(&pre_digest));
+        digest
+    }
+
     async fn build_block(
         &self,
+        slot: Slot,
         parent_hash: <Block as BlockT>::Hash,
         extrinsics: Vec<<Block as BlockT>::Extrinsic>,
     ) -> Result<(Block, StorageChanges), Box<dyn Error>> {
+        let digest = self.mock_subspace_digest(slot);
+
         let mut block_builder =
             self.client
-                .new_block_at(&BlockId::Hash(parent_hash), Digest::default(), false)?;
+                .new_block_at(&BlockId::Hash(parent_hash), digest, false)?;
 
-        for tx in extrinsics {
+        let inherents = block_builder.create_inherents(Self::mock_inherent_data(slot).await?)?;
+
+        for tx in inherents.into_iter().chain(extrinsics) {
             if let Err(err) = sc_block_builder::BlockBuilder::push(&mut block_builder, tx) {
                 tracing::debug!("Got error {:?} while building block", err);
             }
         }
+
         let (block, storage_changes, _) = block_builder.build()?.into_inner();
         Ok((block, storage_changes))
     }
@@ -208,14 +250,26 @@ impl MockPrimaryNode {
         }
     }
 
+    pub async fn produce_n_block_and_slot(&mut self, num: u64) -> Result<(), Box<dyn Error>> {
+        for _ in 0..num {
+            let slot = self.produce_slot();
+            if let Err(err) = self.produce_block(slot).await {
+                panic!("produce_block err {err:?}");
+            }
+        }
+        Ok(())
+    }
+
     /// Produce block based on the current best block and the extrinsics with pool
-    pub async fn produce_block(&mut self) -> Result<(), Box<dyn Error>> {
+    pub async fn produce_block(&mut self, slot: Slot) -> Result<(), Box<dyn Error>> {
         let block_timer = time::Instant::now();
         let parent_hash = self.client.info().best_hash;
         let paretn_number = self.client.info().best_number;
 
         let extrinsics = self.collect_txn_from_pool(paretn_number).await;
-        let (block, storage_changes) = self.build_block(parent_hash, extrinsics).await?;
+
+        let (block, storage_changes) = self.build_block(slot, parent_hash, extrinsics).await?;
+
         tracing::info!(
 			"🎁 Prepared block for proposing at {} ({} ms) [hash: {:?}; parent_hash: {}; extrinsics ({}): [{}]]",
 			block.header().number(),
@@ -235,55 +289,77 @@ impl MockPrimaryNode {
         Ok(())
     }
 
+    /// Produce block based on the given `extrinsics`
+    pub async fn produce_block_with_extrinsics(
+        &mut self,
+        extrinsics: Vec<<Block as BlockT>::Extrinsic>,
+    ) -> Result<(), Box<dyn Error>> {
+        let slot = self.produce_slot();
+        self.produce_block_with(slot, self.client.info().best_hash, vec![], extrinsics)
+            .await
+    }
+
     /// Produce block based on the given `parent_hash` and `extrinsics`
     pub async fn produce_block_with(
         &mut self,
+        slot: Slot,
         parent_hash: <Block as BlockT>::Hash,
+        digest_items: Vec<DigestItem>,
         extrinsics: Vec<<Block as BlockT>::Extrinsic>,
     ) -> Result<(), Box<dyn Error>> {
-        let (block, storage_changes) = self.build_block(parent_hash, extrinsics).await?;
+        let (mut block, storage_changes) = self.build_block(slot, parent_hash, extrinsics).await?;
+
+        // When `DigestItem::RuntimeEnvironmentUpdated` used as `inherent_digests`
+        // it will not present at the block header thus we need to manually inject
+        // digest item here.
+        for i in digest_items {
+            block.header.digest_mut().push(i);
+        }
+
         self.import_block(block, storage_changes).await?;
         Ok(())
     }
 
-    /// Produce the `num` number of slot at the given `interval`
-    pub fn background_slot_producation(&self, interval: Duration, num: u64) {
-        let slot_sender = self.new_slot_notification_sender.clone();
-        self.task_manager
-            .lock()
-            .spawn_essential_handle()
-            .spawn_essential(
-                "mock-slot-producing",
-                None,
-                Box::pin(async move {
-                    for next_slot in 0..num {
-                        slot_sender.notify(|| (Slot::from(next_slot), Hash::random().into()));
-                        tokio::time::sleep(interval).await;
-                    }
-                }),
-            );
+    pub fn produce_slot(&mut self) -> Slot {
+        self.manual_slot.produce_slot()
     }
 
-    /// Produce the `num` number of block at the given `interval`
-    pub fn background_block_producation(
-        mut self,
-        interval: Duration,
-        num: u64,
-    ) -> Arc<Mutex<TaskManager>> {
-        let tm = self.task_manager.clone();
-        tm.lock().spawn_essential_handle().spawn_essential(
-            "mock-block-producing",
-            None,
-            Box::pin(async move {
-                for _ in 0..num {
-                    if let Err(err) = self.produce_block().await {
-                        tracing::error!("background block production met error: {:?}", err);
-                    }
-                    tokio::time::sleep(interval).await;
-                }
-            }),
-        );
-        tm
+    pub fn produce_slot_without_notify(&mut self) -> Slot {
+        self.manual_slot.produce_slot_without_notify()
+    }
+}
+
+pub struct ManualSlot {
+    next_slot: u64,
+    pub new_slot_notification_stream: SubspaceNotificationStream<(Slot, Blake2b256Hash)>,
+    new_slot_notification_sender: SubspaceNotificationSender<(Slot, Blake2b256Hash)>,
+}
+
+impl ManualSlot {
+    fn new() -> Self {
+        let (new_slot_notification_sender, new_slot_notification_stream) =
+            notification::channel("subspace_new_slot_notification_stream");
+        ManualSlot {
+            next_slot: 1,
+            new_slot_notification_sender,
+            new_slot_notification_stream,
+        }
+    }
+
+    pub fn produce_slot(&mut self) -> Slot {
+        let slot = Slot::from(self.next_slot);
+        self.next_slot += 1;
+
+        self.new_slot_notification_sender
+            .notify(|| (slot, Hash::random().into()));
+
+        slot
+    }
+
+    pub fn produce_slot_without_notify(&mut self) -> Slot {
+        let slot = Slot::from(self.next_slot);
+        self.next_slot += 1;
+        slot
     }
 }
 

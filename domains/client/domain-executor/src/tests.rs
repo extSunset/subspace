@@ -1,14 +1,13 @@
 use codec::{Decode, Encode};
 use domain_runtime_primitives::{DomainCoreApi, Hash};
-use domain_test_service::run_primary_chain_validator_node;
+use domain_test_service::run_mock_primary_chain_validator_node;
 use domain_test_service::runtime::{Header, UncheckedExtrinsic};
 use domain_test_service::Keyring::{Alice, Bob, Ferdie};
-use sc_client_api::{Backend, BlockBackend, HeaderBackend};
+use sc_client_api::{BlockBackend, HeaderBackend};
 use sc_executor_common::runtime_blob::RuntimeBlob;
 use sc_service::{BasePath, Role};
 use sc_transaction_pool_api::TransactionSource;
-use sp_api::{AsTrieBackend, ProvideRuntimeApi};
-use sp_core::traits::FetchRuntimeCode;
+use sp_api::ProvideRuntimeApi;
 use sp_core::Pair;
 use sp_domain_digests::AsPredigest;
 use sp_domains::fraud_proof::{ExecutionPhase, FraudProof, InvalidStateTransitionProof};
@@ -19,7 +18,7 @@ use sp_domains::{
 };
 use sp_runtime::generic::{BlockId, Digest, DigestItem};
 use sp_runtime::traits::{BlakeTwo256, Hash as HashT, Header as HeaderT};
-use std::collections::HashSet;
+use std::time::Duration;
 use subspace_core_primitives::BlockNumber;
 use subspace_wasm_tools::read_core_domain_runtime_blob;
 use tempfile::TempDir;
@@ -35,14 +34,12 @@ async fn test_executor_full_node_catching_up() {
     let tokio_handle = tokio::runtime::Handle::current();
 
     // Start Ferdie
-    let (ferdie, ferdie_network_starter) = run_primary_chain_validator_node(
+    let mut ferdie = run_mock_primary_chain_validator_node(
         tokio_handle.clone(),
         Ferdie,
-        vec![],
         BasePath::new(directory.path().join("ferdie")),
     )
     .await;
-    ferdie_network_starter.start_network();
 
     // Run Alice (a system domain authority node)
     let alice = domain_test_service::SystemDomainNodeBuilder::new(
@@ -50,8 +47,7 @@ async fn test_executor_full_node_catching_up() {
         Alice,
         BasePath::new(directory.path().join("alice")),
     )
-    .connect_to_primary_chain_node(&ferdie)
-    .build(Role::Authority, false, false)
+    .build_with_mock(Role::Authority, &ferdie)
     .await;
 
     // Run Bob (a system domain full node)
@@ -60,12 +56,17 @@ async fn test_executor_full_node_catching_up() {
         Bob,
         BasePath::new(directory.path().join("bob")),
     )
-    .connect_to_primary_chain_node(&ferdie)
-    .build(Role::Full, false, false)
+    .build_with_mock(Role::Full, &ferdie)
     .await;
 
     // Bob is able to sync blocks.
-    futures::future::join(alice.wait_for_blocks(3), bob.wait_for_blocks(3)).await;
+    futures::join!(
+        alice.wait_for_blocks(3),
+        bob.wait_for_blocks(3),
+        ferdie.produce_n_block_and_slot(3),
+    )
+    .2
+    .unwrap();
 
     let alice_block_hash = alice
         .client
@@ -81,11 +82,7 @@ async fn test_executor_full_node_catching_up() {
     );
 }
 
-// TODO: This test fails if running all the tests in this crate
-// with `cargo test -- --ignored`, but passes if running individually, `cargo nextest run` also
-// passes.
 #[substrate_test_utils::test(flavor = "multi_thread")]
-#[ignore]
 async fn fraud_proof_verification_in_tx_pool_should_work() {
     let directory = TempDir::new().expect("Must be able to create temporary directory");
 
@@ -96,14 +93,12 @@ async fn fraud_proof_verification_in_tx_pool_should_work() {
     let tokio_handle = tokio::runtime::Handle::current();
 
     // Start Ferdie
-    let (ferdie, ferdie_network_starter) = run_primary_chain_validator_node(
+    let mut ferdie = run_mock_primary_chain_validator_node(
         tokio_handle.clone(),
         Ferdie,
-        vec![],
         BasePath::new(directory.path().join("ferdie")),
     )
     .await;
-    ferdie_network_starter.start_network();
 
     // Run Alice (a system domain authority node)
     let alice = domain_test_service::SystemDomainNodeBuilder::new(
@@ -111,11 +106,20 @@ async fn fraud_proof_verification_in_tx_pool_should_work() {
         Alice,
         BasePath::new(directory.path().join("alice")),
     )
-    .connect_to_primary_chain_node(&ferdie)
-    .build(Role::Authority, false, true)
+    .build_with_mock(Role::Authority, &ferdie)
     .await;
 
-    alice.wait_for_blocks(3).await;
+    futures::join!(alice.wait_for_blocks(3), ferdie.produce_n_block_and_slot(3))
+        .1
+        .unwrap();
+
+    // Wait until the domain bundles are submitted and applied to ensure the head
+    // receipt number are updated
+    let slot = ferdie.produce_slot();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    futures::join!(alice.wait_for_blocks(1), ferdie.produce_block(slot))
+        .1
+        .unwrap();
 
     let header = alice
         .client
@@ -241,7 +245,6 @@ async fn fraud_proof_verification_in_tx_pool_should_work() {
 // when an invalid receipt is received.
 
 #[substrate_test_utils::test(flavor = "multi_thread")]
-#[ignore]
 async fn set_new_code_should_work() {
     let directory = TempDir::new().expect("Must be able to create temporary directory");
 
@@ -252,14 +255,12 @@ async fn set_new_code_should_work() {
     let tokio_handle = tokio::runtime::Handle::current();
 
     // Start Ferdie
-    let (ferdie, ferdie_network_starter) = run_primary_chain_validator_node(
+    let mut ferdie = run_mock_primary_chain_validator_node(
         tokio_handle.clone(),
         Ferdie,
-        vec![],
         BasePath::new(directory.path().join("ferdie")),
     )
     .await;
-    ferdie_network_starter.start_network();
 
     // Run Alice (a system domain authority node)
     let alice = domain_test_service::SystemDomainNodeBuilder::new(
@@ -267,40 +268,34 @@ async fn set_new_code_should_work() {
         Alice,
         BasePath::new(directory.path().join("alice")),
     )
-    .connect_to_primary_chain_node(&ferdie)
-    .build(Role::Authority, false, false)
+    .build_with_mock(Role::Authority, &ferdie)
     .await;
 
-    ferdie.wait_for_blocks(1).await;
+    futures::join!(alice.wait_for_blocks(1), ferdie.produce_n_block_and_slot(1))
+        .1
+        .unwrap();
 
-    let new_runtime_wasm_blob = b"new_runtime_wasm_blob".to_vec();
-
-    let best_number = alice.client.info().best_number;
-    let primary_number = best_number + 1;
-    // Although we're processing the bundle manually, the original bundle processor still works in
-    // the meanwhile, it's possible the executor alice already processed this primary block, expecting next
-    // primary block, in which case we use a dummy primary hash instead.
-    //
-    // Nice to disable the built-in bundle processor and have a full control of the executor block
-    // production manually.
-    let primary_hash = ferdie
-        .client
-        .hash(primary_number)
-        .unwrap()
-        .unwrap_or_else(Hash::random);
-    alice
-        .executor
-        .clone()
-        .process_bundles((primary_hash, primary_number))
-        .await;
+    let slot = ferdie.produce_slot();
+    let best_hash = ferdie.client.info().best_hash;
+    futures::join!(
+        alice.wait_for_blocks(1),
+        ferdie.produce_block_with(
+            slot,
+            best_hash,
+            vec![DigestItem::RuntimeEnvironmentUpdated],
+            vec![]
+        )
+    )
+    .1
+    .unwrap();
 
     let best_hash = alice.client.info().best_hash;
-    let state = alice.backend.state_at(best_hash).expect("Get state");
-    let trie_backend = state.as_trie_backend();
-    let state_runtime_code = sp_state_machine::backend::BackendRuntimeCode::new(trie_backend);
-    let runtime_code = state_runtime_code.fetch_runtime_code().unwrap();
     let logs = alice.client.header(best_hash).unwrap().unwrap().digest.logs;
-    if logs != vec![DigestItem::RuntimeEnvironmentUpdated] {
+    if logs
+        .iter()
+        .find(|i| **i == DigestItem::RuntimeEnvironmentUpdated)
+        .is_none()
+    {
         let extrinsics = alice
             .client
             .block_body(best_hash)
@@ -313,7 +308,6 @@ async fn set_new_code_should_work() {
             .collect::<Vec<_>>();
         panic!("`set_code` not executed, extrinsics in the block: {extrinsics:?}")
     }
-    assert_eq!(runtime_code, new_runtime_wasm_blob);
 }
 
 #[substrate_test_utils::test(flavor = "multi_thread")]
@@ -327,10 +321,9 @@ async fn extract_core_domain_wasm_bundle_in_system_domain_runtime_should_work() 
     let tokio_handle = tokio::runtime::Handle::current();
 
     // Start Ferdie
-    let (ferdie, _ferdie_network_starter) = run_primary_chain_validator_node(
+    let ferdie = run_mock_primary_chain_validator_node(
         tokio_handle.clone(),
         Ferdie,
-        vec![],
         BasePath::new(directory.path().join("ferdie")),
     )
     .await;
@@ -354,7 +347,6 @@ async fn extract_core_domain_wasm_bundle_in_system_domain_runtime_should_work() 
 }
 
 #[substrate_test_utils::test(flavor = "multi_thread")]
-#[ignore]
 async fn pallet_domains_unsigned_extrinsics_should_work() {
     let directory = TempDir::new().expect("Must be able to create temporary directory");
 
@@ -365,14 +357,12 @@ async fn pallet_domains_unsigned_extrinsics_should_work() {
     let tokio_handle = tokio::runtime::Handle::current();
 
     // Start Ferdie
-    let (ferdie, ferdie_network_starter) = run_primary_chain_validator_node(
+    let mut ferdie = run_mock_primary_chain_validator_node(
         tokio_handle.clone(),
         Ferdie,
-        vec![],
         BasePath::new(directory.path().join("ferdie")),
     )
     .await;
-    ferdie_network_starter.start_network();
 
     // Run Alice (a system domain full node)
     // Run a full node deliberately in order to control the execution chain by
@@ -382,140 +372,114 @@ async fn pallet_domains_unsigned_extrinsics_should_work() {
         Alice,
         BasePath::new(directory.path().join("alice")),
     )
-    .connect_to_primary_chain_node(&ferdie)
-    .build(Role::Full, false, false)
+    .build_with_mock(Role::Full, &ferdie)
     .await;
 
-    alice.wait_for_blocks(2).await;
-
-    // Wait for one more block to make sure the execution receipts of block 1,2 are
+    // Wait for 5 blocks to make sure the execution receipts of block 1,2,3,4 are
     // able to be written to the database.
-    alice.wait_for_blocks(1).await;
+    futures::join!(alice.wait_for_blocks(5), ferdie.produce_n_block_and_slot(5))
+        .1
+        .unwrap();
 
-    let create_and_send_submit_bundle = |primary_number: BlockNumber| {
-        let execution_receipt = crate::aux_schema::load_execution_receipt(
-            &*alice.backend,
-            alice.client.hash(primary_number).unwrap().unwrap(),
-        )
-        .expect("Failed to load execution receipt from the local aux_db")
-        .unwrap_or_else(|| {
-            panic!("The requested execution receipt for block {primary_number} does not exist")
-        });
+    let ferdie_client = ferdie.client.clone();
+    let construct_submit_bundle =
+        |primary_number: BlockNumber| -> subspace_test_runtime::UncheckedExtrinsic {
+            let execution_receipt = crate::aux_schema::load_execution_receipt(
+                &*alice.backend,
+                alice.client.hash(primary_number).unwrap().unwrap(),
+            )
+            .expect("Failed to load execution receipt from the local aux_db")
+            .unwrap_or_else(|| {
+                panic!("The requested execution receipt for block {primary_number} does not exist")
+            });
 
-        let bundle = Bundle {
-            header: BundleHeader {
-                primary_number,
-                primary_hash: ferdie.client.hash(primary_number).unwrap().unwrap(),
-                slot_number: (std::time::SystemTime::now()
-                    .duration_since(std::time::SystemTime::UNIX_EPOCH)
-                    .expect("Current time is always after unix epoch; qed")
-                    .as_millis()
-                    / 2000) as u64,
-                extrinsics_root: Default::default(),
-            },
-            receipts: vec![execution_receipt],
-            extrinsics: Vec::<UncheckedExtrinsic>::new(),
+            let bundle = Bundle {
+                header: BundleHeader {
+                    primary_number,
+                    primary_hash: ferdie_client.hash(primary_number).unwrap().unwrap(),
+                    slot_number: (std::time::SystemTime::now()
+                        .duration_since(std::time::SystemTime::UNIX_EPOCH)
+                        .expect("Current time is always after unix epoch; qed")
+                        .as_millis()
+                        / 2000) as u64,
+                    extrinsics_root: Default::default(),
+                },
+                receipts: vec![execution_receipt],
+                extrinsics: Vec::<UncheckedExtrinsic>::new(),
+            };
+
+            let pair = ExecutorPair::from_string("//Alice", None).unwrap();
+            let signature = pair.sign(bundle.hash().as_ref());
+
+            let signed_opaque_bundle = SignedBundle {
+                bundle,
+                bundle_solution: BundleSolution::System {
+                    authority_stake_weight: Default::default(),
+                    authority_witness: Default::default(),
+                    proof_of_election: ProofOfElection::dummy(DomainId::SYSTEM, pair.public()),
+                }, // TODO: mock ProofOfElection properly
+                signature,
+            }
+            .into_signed_opaque_bundle();
+
+            subspace_test_runtime::UncheckedExtrinsic::new_unsigned(
+                pallet_domains::Call::submit_bundle {
+                    signed_opaque_bundle,
+                }
+                .into(),
+            )
         };
 
-        let pair = ExecutorPair::from_string("//Alice", None).unwrap();
-        let signature = pair.sign(bundle.hash().as_ref());
-
-        let signed_opaque_bundle = SignedBundle {
-            bundle,
-            bundle_solution: BundleSolution::System {
-                authority_stake_weight: Default::default(),
-                authority_witness: Default::default(),
-                proof_of_election: ProofOfElection::dummy(DomainId::SYSTEM, pair.public()),
-            }, // TODO: mock ProofOfElection properly
-            signature,
-        }
-        .into_signed_opaque_bundle();
-
-        let tx = subspace_test_runtime::UncheckedExtrinsic::new_unsigned(
-            pallet_domains::Call::submit_bundle {
-                signed_opaque_bundle,
-            }
-            .into(),
-        );
-
-        let pool = ferdie.transaction_pool.pool();
-        let ferdie_best_hash = ferdie.client.info().best_hash;
-
-        async move {
-            pool.submit_one(
-                &BlockId::Hash(ferdie_best_hash),
-                TransactionSource::External,
-                tx.into(),
-            )
-            .await
-        }
-    };
-
-    let ready_txs = || {
+    futures::join!(
+        alice.wait_for_blocks(1),
+        ferdie.produce_block_with_extrinsics(vec![
+            construct_submit_bundle(1).into(),
+            construct_submit_bundle(2).into()
+        ]),
+    )
+    .1
+    .unwrap();
+    let best_hash = ferdie.client.info().best_hash;
+    assert_eq!(
         ferdie
-            .transaction_pool
-            .pool()
-            .validated_pool()
-            .ready()
-            .map(|tx| tx.hash)
-            .collect::<Vec<_>>()
-    };
-
-    let (tx1, tx2) = futures::join!(
-        create_and_send_submit_bundle(1),
-        create_and_send_submit_bundle(2),
+            .client
+            .runtime_api()
+            .head_receipt_number(&BlockId::Hash(best_hash))
+            .unwrap(),
+        2,
     );
-    assert_eq!(vec![tx1.unwrap(), tx2.unwrap()], ready_txs());
 
-    // Wait for up to 5 blocks to ensure the ready txs can be consumed.
-    for _ in 0..5 {
-        alice.wait_for_blocks(1).await;
-        if ready_txs().is_empty() {
-            break;
-        }
-    }
-    assert!(ready_txs().is_empty());
-
-    alice.wait_for_blocks(2).await;
-
-    let future_txs = || {
+    // The bundle 4 will fail to execute due to the receipt is not consecutive
+    futures::join!(
+        alice.wait_for_blocks(1),
+        ferdie.produce_block_with_extrinsics(vec![construct_submit_bundle(4).into()]),
+    )
+    .1
+    .unwrap();
+    let best_hash = ferdie.client.info().best_hash;
+    assert_eq!(
         ferdie
-            .transaction_pool
-            .pool()
-            .validated_pool()
-            .futures()
-            .into_iter()
-            .map(|(tx_hash, _)| tx_hash)
-            .collect::<HashSet<_>>()
-    };
-    // best execution chain number is 2, receipt for #4 will be put into the futures queue.
-    let tx4 = create_and_send_submit_bundle(4)
-        .await
-        .expect("Submit a future receipt successfully");
-    assert_eq!(HashSet::from([tx4]), future_txs());
+            .client
+            .runtime_api()
+            .head_receipt_number(&BlockId::Hash(best_hash))
+            .unwrap(),
+        2,
+    );
 
-    // max drift is 2, hence the max allowed receipt number is 2 + 2, 5 will be rejected as being
-    // too far.
-    match create_and_send_submit_bundle(5).await.unwrap_err() {
-        sc_transaction_pool::error::Error::Pool(
-            sc_transaction_pool_api::error::Error::InvalidTransaction(invalid_tx),
-        ) => assert_eq!(invalid_tx, InvalidTransactionCode::ExecutionReceipt.into()),
-        e => panic!("Unexpected error while submitting execution receipt: {e}"),
-    }
-
-    let tx3 = create_and_send_submit_bundle(3)
-        .await
-        .expect("Submit receipt 3 successfully");
-    // All future txs become ready once the required tx is ready.
-    assert_eq!(vec![tx3, tx4], ready_txs());
-    assert!(future_txs().is_empty());
-
-    // Wait for up to 5 blocks to ensure the ready txs can be consumed.
-    for _ in 0..5 {
-        alice.wait_for_blocks(1).await;
-        if ready_txs().is_empty() {
-            break;
-        }
-    }
-    assert!(ready_txs().is_empty());
+    // The bundle 3 will successfully executed and update the head receipt number
+    futures::join!(
+        alice.wait_for_blocks(1),
+        ferdie.produce_block_with_extrinsics(vec![construct_submit_bundle(3).into()]),
+    )
+    .1
+    .unwrap();
+    let best_hash = ferdie.client.info().best_hash;
+    assert_eq!(
+        ferdie
+            .client
+            .runtime_api()
+            .head_receipt_number(&BlockId::Hash(best_hash))
+            .unwrap(),
+        3,
+    );
 }

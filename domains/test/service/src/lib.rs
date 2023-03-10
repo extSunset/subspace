@@ -293,6 +293,7 @@ async fn run_executor_with_mock(
                 )
             }),
         primary_chain_mock_node
+            .manual_slot
             .new_slot_notification_stream
             .subscribe(),
         block_import_throttling_buffer_size,

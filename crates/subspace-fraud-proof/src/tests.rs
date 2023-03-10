@@ -2,7 +2,7 @@ use crate::{ExecutionProver, ProofVerifier};
 use codec::Encode;
 use domain_block_builder::{BlockBuilder, RecordProof};
 use domain_runtime_primitives::{DomainCoreApi, Hash};
-use domain_test_service::run_primary_chain_validator_node;
+use domain_test_service::run_mock_primary_chain_validator_node;
 use domain_test_service::runtime::Header;
 use domain_test_service::Keyring::{Alice, Bob, Charlie, Dave, Ferdie};
 use sc_client_api::{HeaderBackend, StorageProof};
@@ -13,6 +13,7 @@ use sp_domains::fraud_proof::{ExecutionPhase, FraudProof, InvalidStateTransition
 use sp_domains::DomainId;
 use sp_runtime::generic::{Digest, DigestItem};
 use sp_runtime::traits::{BlakeTwo256, Header as HeaderT};
+use std::time::Duration;
 use subspace_runtime_primitives::opaque::Block;
 use tempfile::TempDir;
 
@@ -20,7 +21,6 @@ use tempfile::TempDir;
 const TEST_DOMAIN_ID: DomainId = DomainId::SYSTEM;
 
 #[substrate_test_utils::test(flavor = "multi_thread")]
-#[ignore]
 async fn execution_proof_creation_and_verification_should_work() {
     let directory = TempDir::new().expect("Must be able to create temporary directory");
 
@@ -30,15 +30,12 @@ async fn execution_proof_creation_and_verification_should_work() {
 
     let tokio_handle = tokio::runtime::Handle::current();
 
-    // Start Ferdie
-    let (ferdie, ferdie_network_starter) = run_primary_chain_validator_node(
+    let mut ferdie = run_mock_primary_chain_validator_node(
         tokio_handle.clone(),
         Ferdie,
-        vec![],
         BasePath::new(directory.path().join("ferdie")),
     )
     .await;
-    ferdie_network_starter.start_network();
 
     // Run Alice (a system domain authority node)
     let alice = domain_test_service::SystemDomainNodeBuilder::new(
@@ -46,8 +43,7 @@ async fn execution_proof_creation_and_verification_should_work() {
         Alice,
         BasePath::new(directory.path().join("alice")),
     )
-    .connect_to_primary_chain_node(&ferdie)
-    .build(Role::Authority, false, false)
+    .build_with_mock(Role::Authority, &ferdie)
     .await;
 
     // Run Bob (a system domain full node)
@@ -56,12 +52,18 @@ async fn execution_proof_creation_and_verification_should_work() {
         Bob,
         BasePath::new(directory.path().join("bob")),
     )
-    .connect_to_primary_chain_node(&ferdie)
-    .build(Role::Full, false, false)
+    .build_with_mock(Role::Full, &ferdie)
     .await;
 
     // Bob is able to sync blocks.
-    futures::future::join(alice.wait_for_blocks(1), bob.wait_for_blocks(1)).await;
+    let slot = ferdie.produce_slot();
+    futures::join!(
+        alice.wait_for_blocks(1),
+        bob.wait_for_blocks(1),
+        ferdie.produce_block(slot),
+    )
+    .2
+    .unwrap();
 
     let transfer_to_charlie = domain_test_service::construct_extrinsic(
         &alice.client,
@@ -107,30 +109,33 @@ async fn execution_proof_creation_and_verification_should_work() {
             .expect("Failed to send extrinsic");
     }
 
-    // Ideally we just need to wait one block and the test txs should be all included
-    // in the next block, but the txs are probably unable to be included if the machine
-    // is overloaded, hence we manually mock the bundles processing to avoid the occasional
-    // test failure (https://github.com/subspace/subspace/runs/5663241460?check_suite_focus=true).
-    //
-    // alice.wait_for_blocks(1).await;
-
-    let primary_info = (
-        ferdie.client.info().best_hash,
-        ferdie.client.info().best_number,
-    );
-    alice.executor.clone().process_bundles(primary_info).await;
+    // Wait until all tx included in the domain bundle and it is submitted to `ferdie`
+    let slot = ferdie.produce_slot();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    // Wait for `alice` to apply these tx
+    futures::future::join(alice.wait_for_blocks(1), ferdie.produce_block(slot))
+        .await
+        .1
+        .unwrap();
 
     let best_hash = alice.client.info().best_hash;
     let header = alice.client.header(best_hash).unwrap().unwrap();
     let parent_header = alice.client.header(*header.parent_hash()).unwrap().unwrap();
 
     let create_block_builder = || {
+        let primary_hash = ferdie.client.hash(*header.number()).unwrap().unwrap();
+        let digest = Digest {
+            logs: vec![DigestItem::primary_block_info((
+                *header.number(),
+                primary_hash,
+            ))],
+        };
         BlockBuilder::new(
             &*alice.client,
             parent_header.hash(),
             *parent_header.number(),
             RecordProof::No,
-            Default::default(),
+            digest,
             &*alice.backend,
             test_txs.clone().into_iter().map(Into::into).collect(),
         )
@@ -150,12 +155,18 @@ async fn execution_proof_creation_and_verification_should_work() {
         );
     }
 
+    let primary_hash = ferdie.client.hash(*header.number()).unwrap().unwrap();
     let new_header = Header::new(
         *header.number(),
         Default::default(),
         Default::default(),
         parent_header.hash(),
-        Default::default(),
+        Digest {
+            logs: vec![DigestItem::primary_block_info((
+                *header.number(),
+                primary_hash,
+            ))],
+        },
     );
     let execution_phase = ExecutionPhase::InitializeBlock {
         call_data: new_header.encode(),
@@ -319,7 +330,6 @@ async fn execution_proof_creation_and_verification_should_work() {
 }
 
 #[substrate_test_utils::test(flavor = "multi_thread")]
-#[ignore]
 async fn invalid_execution_proof_should_not_work() {
     let directory = TempDir::new().expect("Must be able to create temporary directory");
 
@@ -330,14 +340,12 @@ async fn invalid_execution_proof_should_not_work() {
     let tokio_handle = tokio::runtime::Handle::current();
 
     // Start Ferdie
-    let (ferdie, ferdie_network_starter) = run_primary_chain_validator_node(
+    let mut ferdie = run_mock_primary_chain_validator_node(
         tokio_handle.clone(),
         Ferdie,
-        vec![],
         BasePath::new(directory.path().join("ferdie")),
     )
     .await;
-    ferdie_network_starter.start_network();
 
     // Run Alice (a system domain authority node)
     let alice = domain_test_service::SystemDomainNodeBuilder::new(
@@ -345,8 +353,7 @@ async fn invalid_execution_proof_should_not_work() {
         Alice,
         BasePath::new(directory.path().join("alice")),
     )
-    .connect_to_primary_chain_node(&ferdie)
-    .build(Role::Authority, false, false)
+    .build_with_mock(Role::Authority, &ferdie)
     .await;
 
     // Run Bob (a system domain full node)
@@ -355,12 +362,18 @@ async fn invalid_execution_proof_should_not_work() {
         Bob,
         BasePath::new(directory.path().join("bob")),
     )
-    .connect_to_primary_chain_node(&ferdie)
-    .build(Role::Full, false, false)
+    .build_with_mock(Role::Full, &ferdie)
     .await;
 
     // Bob is able to sync blocks.
-    futures::future::join(alice.wait_for_blocks(1), bob.wait_for_blocks(1)).await;
+    let slot = ferdie.produce_slot();
+    futures::join!(
+        alice.wait_for_blocks(1),
+        bob.wait_for_blocks(1),
+        ferdie.produce_block(slot),
+    )
+    .2
+    .unwrap();
 
     let transfer_to_charlie = domain_test_service::construct_extrinsic(
         &alice.client,
@@ -396,8 +409,14 @@ async fn invalid_execution_proof_should_not_work() {
             .expect("Failed to send extrinsic");
     }
 
-    // Wait until the test txs are included in the next block.
-    alice.wait_for_blocks(1).await;
+    // Wait until the test txs are included in the domain bundle
+    let slot = ferdie.produce_slot();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    // Wait for `alice` to apply these tx
+    futures::future::join(alice.wait_for_blocks(1), ferdie.produce_block(slot))
+        .await
+        .1
+        .unwrap();
 
     let best_hash = alice.client.info().best_hash;
     let header = alice.client.header(best_hash).unwrap().unwrap();
