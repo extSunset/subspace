@@ -63,7 +63,7 @@ async fn test_executor_full_node_catching_up() {
     futures::join!(
         alice.wait_for_blocks(3),
         bob.wait_for_blocks(3),
-        ferdie.produce_n_block_and_slot(3),
+        ferdie.produce_n_blocks(3),
     )
     .2
     .unwrap();
@@ -109,15 +109,18 @@ async fn fraud_proof_verification_in_tx_pool_should_work() {
     .build_with_mock(Role::Authority, &ferdie)
     .await;
 
-    futures::join!(alice.wait_for_blocks(3), ferdie.produce_n_block_and_slot(3))
+    futures::join!(alice.wait_for_blocks(3), ferdie.produce_n_blocks(3))
         .1
         .unwrap();
 
     // Wait until the domain bundles are submitted and applied to ensure the head
     // receipt number are updated
     let slot = ferdie.produce_slot();
-    tokio::time::sleep(Duration::from_millis(100)).await;
-    futures::join!(alice.wait_for_blocks(1), ferdie.produce_block(slot))
+    ferdie
+        .wait_for_bundle(slot.into(), alice.key)
+        .await
+        .unwrap();
+    futures::join!(alice.wait_for_blocks(1), ferdie.produce_block())
         .1
         .unwrap();
 
@@ -271,7 +274,7 @@ async fn set_new_code_should_work() {
     .build_with_mock(Role::Authority, &ferdie)
     .await;
 
-    futures::join!(alice.wait_for_blocks(1), ferdie.produce_n_block_and_slot(1))
+    futures::join!(alice.wait_for_blocks(1), ferdie.produce_n_blocks(1))
         .1
         .unwrap();
 
@@ -377,7 +380,7 @@ async fn pallet_domains_unsigned_extrinsics_should_work() {
 
     // Wait for 5 blocks to make sure the execution receipts of block 1,2,3,4 are
     // able to be written to the database.
-    futures::join!(alice.wait_for_blocks(5), ferdie.produce_n_block_and_slot(5))
+    futures::join!(alice.wait_for_blocks(5), ferdie.produce_n_blocks(5))
         .1
         .unwrap();
 

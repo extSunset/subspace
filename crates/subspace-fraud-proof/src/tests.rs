@@ -56,11 +56,10 @@ async fn execution_proof_creation_and_verification_should_work() {
     .await;
 
     // Bob is able to sync blocks.
-    let slot = ferdie.produce_slot();
     futures::join!(
         alice.wait_for_blocks(1),
         bob.wait_for_blocks(1),
-        ferdie.produce_block(slot),
+        ferdie.produce_block(),
     )
     .2
     .unwrap();
@@ -111,9 +110,12 @@ async fn execution_proof_creation_and_verification_should_work() {
 
     // Wait until all tx included in the domain bundle and it is submitted to `ferdie`
     let slot = ferdie.produce_slot();
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    ferdie
+        .wait_for_bundle(slot.into(), alice.key)
+        .await
+        .unwrap();
     // Wait for `alice` to apply these tx
-    futures::future::join(alice.wait_for_blocks(1), ferdie.produce_block(slot))
+    futures::future::join(alice.wait_for_blocks(1), ferdie.produce_block())
         .await
         .1
         .unwrap();
@@ -366,11 +368,10 @@ async fn invalid_execution_proof_should_not_work() {
     .await;
 
     // Bob is able to sync blocks.
-    let slot = ferdie.produce_slot();
     futures::join!(
         alice.wait_for_blocks(1),
         bob.wait_for_blocks(1),
-        ferdie.produce_block(slot),
+        ferdie.produce_block(),
     )
     .2
     .unwrap();
@@ -411,9 +412,12 @@ async fn invalid_execution_proof_should_not_work() {
 
     // Wait until the test txs are included in the domain bundle
     let slot = ferdie.produce_slot();
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    ferdie
+        .wait_for_bundle(slot.into(), alice.key)
+        .await
+        .unwrap();
     // Wait for `alice` to apply these tx
-    futures::future::join(alice.wait_for_blocks(1), ferdie.produce_block(slot))
+    futures::future::join(alice.wait_for_blocks(1), ferdie.produce_block())
         .await
         .1
         .unwrap();

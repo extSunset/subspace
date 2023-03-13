@@ -1,8 +1,9 @@
 use crate::node_config;
+use codec::{Decode, Encode};
 use futures::channel::mpsc;
 use futures::{select, FutureExt, StreamExt};
 use sc_block_builder::BlockBuilderProvider;
-use sc_client_api::backend;
+use sc_client_api::{backend, BlockBackend};
 use sc_consensus::block_import::{
     BlockCheckParams, BlockImportParams, ForkChoiceStrategy, ImportResult,
 };
@@ -15,18 +16,19 @@ use sc_executor::NativeElseWasmExecutor;
 use sc_service::{BasePath, InPoolTransaction, TaskManager, TransactionPool};
 use sp_api::{ApiExt, HashT, HeaderT, ProvideRuntimeApi, TransactionFor};
 use sp_application_crypto::UncheckedFrom;
-use sp_blockchain::HeaderBackend;
+use sp_blockchain::{HeaderBackend, HeaderMetadata};
 use sp_consensus::{BlockOrigin, CacheKeyId, Error as ConsensusError, NoNetwork, SyncOracle};
 use sp_consensus_slots::Slot;
 use sp_consensus_subspace::digests::{CompatibleDigestItem, PreDigest};
 use sp_consensus_subspace::FarmerPublicKey;
+use sp_domains::ExecutorPublicKey;
 use sp_inherents::{InherentData, InherentDataProvider};
 use sp_keyring::Sr25519Keyring;
 use sp_runtime::generic::{BlockId, Digest};
 use sp_runtime::traits::{BlakeTwo256, Block as BlockT, NumberFor};
 use sp_runtime::DigestItem;
 use sp_timestamp::Timestamp;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::error::Error;
 use std::sync::Arc;
 use std::time;
@@ -36,7 +38,7 @@ use subspace_runtime_primitives::{AccountId, Hash};
 use subspace_service::FullSelectChain;
 use subspace_solving::create_chunk_signature;
 use subspace_test_client::{Backend, Client, FraudProofVerifier, TestExecutorDispatch};
-use subspace_test_runtime::{RuntimeApi, SLOT_DURATION};
+use subspace_test_runtime::{RuntimeApi, RuntimeCall, UncheckedExtrinsic, SLOT_DURATION};
 use subspace_transaction_pool::bundle_validator::BundleValidator;
 use subspace_transaction_pool::FullPool;
 
@@ -228,14 +230,18 @@ impl MockPrimaryNode {
     async fn import_block(
         &mut self,
         block: Block,
-        storage_changes: StorageChanges,
+        storage_changes: Option<StorageChanges>,
     ) -> Result<(), Box<dyn Error>> {
         let (header, body) = block.deconstruct();
         let block_import_params = {
             let mut import_block = BlockImportParams::new(BlockOrigin::Own, header);
             import_block.body = Some(body);
-            import_block.state_action =
-                StateAction::ApplyChanges(sc_consensus::StorageChanges::Changes(storage_changes));
+            import_block.state_action = match storage_changes {
+                Some(changes) => {
+                    StateAction::ApplyChanges(sc_consensus::StorageChanges::Changes(changes))
+                }
+                None => StateAction::Execute,
+            };
             import_block
         };
 
@@ -250,19 +256,74 @@ impl MockPrimaryNode {
         }
     }
 
-    pub async fn produce_n_block_and_slot(&mut self, num: u64) -> Result<(), Box<dyn Error>> {
-        for _ in 0..num {
-            let slot = self.produce_slot();
-            if let Err(err) = self.produce_block(slot).await {
-                panic!("produce_block err {err:?}");
+    pub async fn sync_from_node(&mut self, peer: &MockPrimaryNode) -> Result<(), Box<dyn Error>> {
+        let local_info = self.client.info();
+        let peer_info = peer.client.info();
+        if local_info.best_number >= peer_info.best_number {
+            return Ok(());
+        }
+        let mut enacted = VecDeque::new();
+        let mut from = self.client.header_metadata(local_info.best_hash)?;
+        let mut to = peer.client.header_metadata(peer_info.best_hash)?;
+        while to.number > from.number {
+            enacted.push_front(to.hash);
+            to = peer.client.header_metadata(to.parent)?;
+        }
+        while to.hash != from.hash {
+            enacted.push_front(to.hash);
+            to = peer.client.header_metadata(to.parent)?;
+            from = self.client.header_metadata(from.parent)?;
+        }
+        for h in enacted {
+            let block = peer.client.block(h)?.expect("").block;
+            self.import_block(block, None).await?;
+        }
+        Ok(())
+    }
+
+    pub async fn wait_for_bundle(
+        &self,
+        slot: u64,
+        author_key: Sr25519Keyring,
+    ) -> Result<(), Box<dyn Error>> {
+        let author_key = ExecutorPublicKey::unchecked_from(author_key.public().0);
+        let mut import_tx_stream = self.transaction_pool.import_notification_stream();
+        while let Some(ready_tx) = import_tx_stream.next().await {
+            let tx = self
+                .transaction_pool
+                .ready_transaction(&ready_tx)
+                .expect("txn import stream only notified ready tx; ped");
+            match UncheckedExtrinsic::decode(&mut tx.data.encode().as_slice())?.function {
+                RuntimeCall::Domains(pallet_domains::Call::submit_bundle {
+                    signed_opaque_bundle,
+                }) => {
+                    if signed_opaque_bundle.bundle.header.slot_number == slot
+                        && signed_opaque_bundle
+                            .bundle_solution
+                            .proof_of_election()
+                            .executor_public_key
+                            == author_key
+                    {
+                        break;
+                    }
+                }
+                _ => continue,
             }
         }
         Ok(())
     }
 
+    pub async fn produce_n_blocks(&mut self, n: u64) -> Result<(), Box<dyn Error>> {
+        for _ in 0..n {
+            self.produce_block().await?;
+        }
+        Ok(())
+    }
+
     /// Produce block based on the current best block and the extrinsics with pool
-    pub async fn produce_block(&mut self, slot: Slot) -> Result<(), Box<dyn Error>> {
+    pub async fn produce_block(&mut self) -> Result<(), Box<dyn Error>> {
         let block_timer = time::Instant::now();
+        let slot = self.produce_slot();
         let parent_hash = self.client.info().best_hash;
         let paretn_number = self.client.info().best_number;
 
@@ -284,7 +345,7 @@ impl MockPrimaryNode {
 				.join(", ")
 		);
 
-        self.import_block(block, storage_changes).await?;
+        self.import_block(block, Some(storage_changes)).await?;
 
         Ok(())
     }
@@ -296,7 +357,8 @@ impl MockPrimaryNode {
     ) -> Result<(), Box<dyn Error>> {
         let slot = self.produce_slot();
         self.produce_block_with(slot, self.client.info().best_hash, vec![], extrinsics)
-            .await
+            .await?;
+        Ok(())
     }
 
     /// Produce block based on the given `parent_hash` and `extrinsics`
@@ -306,7 +368,7 @@ impl MockPrimaryNode {
         parent_hash: <Block as BlockT>::Hash,
         digest_items: Vec<DigestItem>,
         extrinsics: Vec<<Block as BlockT>::Extrinsic>,
-    ) -> Result<(), Box<dyn Error>> {
+    ) -> Result<<Block as BlockT>::Hash, Box<dyn Error>> {
         let (mut block, storage_changes) = self.build_block(slot, parent_hash, extrinsics).await?;
 
         // When `DigestItem::RuntimeEnvironmentUpdated` used as `inherent_digests`
@@ -315,17 +377,17 @@ impl MockPrimaryNode {
         for i in digest_items {
             block.header.digest_mut().push(i);
         }
+        let block_hash = block.hash();
+        self.import_block(block, Some(storage_changes)).await?;
+        Ok(block_hash)
+    }
 
-        self.import_block(block, storage_changes).await?;
-        Ok(())
+    pub fn next_slot(&self) -> u64 {
+        self.manual_slot.next_slot
     }
 
     pub fn produce_slot(&mut self) -> Slot {
         self.manual_slot.produce_slot()
-    }
-
-    pub fn produce_slot_without_notify(&mut self) -> Slot {
-        self.manual_slot.produce_slot_without_notify()
     }
 }
 
@@ -353,12 +415,6 @@ impl ManualSlot {
         self.new_slot_notification_sender
             .notify(|| (slot, Hash::random().into()));
 
-        slot
-    }
-
-    pub fn produce_slot_without_notify(&mut self) -> Slot {
-        let slot = Slot::from(self.next_slot);
-        self.next_slot += 1;
         slot
     }
 }
