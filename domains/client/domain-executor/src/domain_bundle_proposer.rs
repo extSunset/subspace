@@ -175,7 +175,7 @@ where
             let max_allowed = (head_receipt_number + max_drift).min(header_number);
 
             let mut to_send = head_receipt_number + 1;
-            let mut receipts = Vec::with_capacity((max_allowed - to_send + 1) as usize);
+            let mut receipts = Vec::with_capacity((max_allowed + 1 - to_send) as usize);
             while to_send <= max_allowed {
                 let block_hash = self.client.hash(to_send.into())?.ok_or_else(|| {
                     sp_blockchain::Error::Backend(format!("Hash for Block {to_send:?} not found"))
