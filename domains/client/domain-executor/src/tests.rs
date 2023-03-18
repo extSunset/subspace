@@ -18,7 +18,6 @@ use sp_domains::{
 };
 use sp_runtime::generic::{BlockId, Digest, DigestItem};
 use sp_runtime::traits::{BlakeTwo256, Hash as HashT, Header as HeaderT};
-use std::time::Duration;
 use subspace_core_primitives::BlockNumber;
 use subspace_wasm_tools::read_core_domain_runtime_blob;
 use tempfile::TempDir;
@@ -60,6 +59,7 @@ async fn test_executor_full_node_catching_up() {
     .await;
 
     // Bob is able to sync blocks.
+    // FIXME: produce_n_blocks return error will block this fut forever
     futures::join!(
         alice.wait_for_blocks(3),
         bob.wait_for_blocks(3),
@@ -115,6 +115,9 @@ async fn fraud_proof_verification_in_tx_pool_should_work() {
 
     // Wait until the domain bundles are submitted and applied to ensure the head
     // receipt number are updated
+    // FIXME: wait_for_bundle may wait forever if alice skip the slot due to lagging behind
+    // its parent chain.
+    // TODO: implement `wait_system_domain_catch_up`
     let slot = ferdie.produce_slot();
     ferdie
         .wait_for_bundle(slot.into(), alice.key)
@@ -144,18 +147,18 @@ async fn fraud_proof_verification_in_tx_pool_should_work() {
     );
 
     let digest = {
-        let primary_block_info =
-            DigestItem::primary_block_info((1, ferdie.client.hash(1).unwrap().unwrap()));
-
         Digest {
-            logs: vec![primary_block_info],
+            logs: vec![
+                DigestItem::primary_block_info((0, ferdie.client.info().genesis_hash)),
+                DigestItem::primary_block_info((1, ferdie.client.hash(1).unwrap().unwrap())),
+            ],
         }
     };
 
     let new_header = Header::new(
         *header.number(),
         header.hash(),
-        Default::default(),
+        *header.state_root(),
         parent_header.hash(),
         digest,
     );
@@ -278,16 +281,18 @@ async fn set_new_code_should_work() {
         .1
         .unwrap();
 
-    let slot = ferdie.produce_slot();
-    let best_hash = ferdie.client.info().best_hash;
+    let (block, storage_changes) = {
+        let bp = ferdie.prepare_block().await;
+        let (mut block, storage_changes) = ferdie.build_block(bp).await.unwrap();
+        block
+            .header
+            .digest_mut()
+            .push(DigestItem::RuntimeEnvironmentUpdated);
+        (block, Some(storage_changes))
+    };
     futures::join!(
         alice.wait_for_blocks(1),
-        ferdie.produce_block_with(
-            slot,
-            best_hash,
-            vec![DigestItem::RuntimeEnvironmentUpdated],
-            vec![]
-        )
+        ferdie.import_block(block, storage_changes)
     )
     .1
     .unwrap();
@@ -433,12 +438,13 @@ async fn pallet_domains_unsigned_extrinsics_should_work() {
             )
         };
 
+    let block_params = ferdie.prepare_block_with_extrinsics(vec![
+        construct_submit_bundle(1).into(),
+        construct_submit_bundle(2).into(),
+    ]);
     futures::join!(
         alice.wait_for_blocks(1),
-        ferdie.produce_block_with_extrinsics(vec![
-            construct_submit_bundle(1).into(),
-            construct_submit_bundle(2).into()
-        ]),
+        ferdie.produce_block_with(block_params),
     )
     .1
     .unwrap();
@@ -447,32 +453,31 @@ async fn pallet_domains_unsigned_extrinsics_should_work() {
         ferdie
             .client
             .runtime_api()
-            .head_receipt_number(&BlockId::Hash(best_hash))
+            .head_receipt_number(best_hash)
             .unwrap(),
         2,
     );
 
     // The bundle 4 will fail to execute due to the receipt is not consecutive
-    futures::join!(
-        alice.wait_for_blocks(1),
-        ferdie.produce_block_with_extrinsics(vec![construct_submit_bundle(4).into()]),
-    )
-    .1
-    .unwrap();
+    let block_params =
+        ferdie.prepare_block_with_extrinsics(vec![construct_submit_bundle(4).into()]);
+    assert!(ferdie.produce_block_with(block_params).await.is_err());
     let best_hash = ferdie.client.info().best_hash;
     assert_eq!(
         ferdie
             .client
             .runtime_api()
-            .head_receipt_number(&BlockId::Hash(best_hash))
+            .head_receipt_number(best_hash)
             .unwrap(),
         2,
     );
 
     // The bundle 3 will successfully executed and update the head receipt number
+    let block_params =
+        ferdie.prepare_block_with_extrinsics(vec![construct_submit_bundle(3).into()]);
     futures::join!(
         alice.wait_for_blocks(1),
-        ferdie.produce_block_with_extrinsics(vec![construct_submit_bundle(3).into()]),
+        ferdie.produce_block_with(block_params),
     )
     .1
     .unwrap();
@@ -481,7 +486,7 @@ async fn pallet_domains_unsigned_extrinsics_should_work() {
         ferdie
             .client
             .runtime_api()
-            .head_receipt_number(&BlockId::Hash(best_hash))
+            .head_receipt_number(best_hash)
             .unwrap(),
         3,
     );

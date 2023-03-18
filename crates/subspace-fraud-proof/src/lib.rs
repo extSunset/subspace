@@ -14,7 +14,6 @@ mod tests;
 use codec::{Decode, Encode};
 pub use invalid_state_transition_proof::ExecutionProver;
 use invalid_state_transition_proof::InvalidStateTransitionProofVerifier;
-use sc_client_api::backend;
 use sp_api::ProvideRuntimeApi;
 use sp_core::traits::{CodeExecutor, SpawnNamed};
 use sp_domains::fraud_proof::{FraudProof, VerificationError};
@@ -52,8 +51,7 @@ impl<FPBlock, PBlock, C, Exec: Clone, Spawn: Clone, Hash> Clone
     }
 }
 
-impl<FPBlock, PBlock, C, Exec, Spawn, Hash>
-    ProofVerifier<FPBlock, PBlock, C, Exec, Spawn, Hash>
+impl<FPBlock, PBlock, C, Exec, Spawn, Hash> ProofVerifier<FPBlock, PBlock, C, Exec, Spawn, Hash>
 where
     FPBlock: BlockT,
     PBlock: BlockT,

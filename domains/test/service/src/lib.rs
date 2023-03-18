@@ -288,12 +288,10 @@ async fn run_executor_with_mock(
             .then(|imported_block_notification| async move {
                 (
                     imported_block_notification.block_number,
-                    imported_block_notification.fork_choice,
                     imported_block_notification.block_import_acknowledgement_sender,
                 )
             }),
         primary_chain_mock_node
-            .manual_slot
             .new_slot_notification_stream
             .subscribe(),
         block_import_throttling_buffer_size,

@@ -10182,7 +10182,6 @@ name = "subspace-test-service"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "domain-runtime-primitives",
  "frame-system",
  "futures 0.3.26",
  "futures-timer",

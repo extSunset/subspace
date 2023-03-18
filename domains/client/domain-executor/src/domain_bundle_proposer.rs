@@ -170,7 +170,7 @@ where
                 )
             })?;
             vec![load_receipt(block_hash)?]
-        } else {
+        } else if header_number > head_receipt_number {
             // Receipts for some previous blocks are missing.
             let max_allowed = (head_receipt_number + max_drift).min(header_number);
 
@@ -184,6 +184,8 @@ where
                 to_send += 1;
             }
             receipts
+        } else {
+            vec![]
         };
 
         Ok(receipts)

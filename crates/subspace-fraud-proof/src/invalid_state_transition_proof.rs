@@ -193,8 +193,7 @@ impl<PBlock, C, Exec: Clone, Spawn: Clone, Hash> Clone
     }
 }
 
-impl<PBlock, C, Exec, Spawn, Hash>
-    InvalidStateTransitionProofVerifier<PBlock, C, Exec, Spawn, Hash>
+impl<PBlock, C, Exec, Spawn, Hash> InvalidStateTransitionProofVerifier<PBlock, C, Exec, Spawn, Hash>
 where
     PBlock: BlockT,
     C: ProvideRuntimeApi<PBlock> + Send + Sync,

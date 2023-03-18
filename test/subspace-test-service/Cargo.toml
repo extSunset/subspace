@@ -17,7 +17,6 @@ targets = ["x86_64-unknown-linux-gnu"]
 [dependencies]
 async-trait = "0.1.58"
 codec = { package = "parity-scale-codec", version = "3.2.1", default-features = false, features = ["derive"] }
-domain-runtime-primitives = { version = "0.1.0", path = "../../domains/primitives/runtime" }
 frame-system = { git = "https://github.com/subspace/substrate", rev = "456cfad45a178617f6886ec400c312f2fea59232" }
 futures = "0.3.26"
 futures-timer = "3.0.1"

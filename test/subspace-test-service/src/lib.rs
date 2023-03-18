@@ -56,7 +56,10 @@ use substrate_test_client::{
     BlockchainEventsExt, RpcHandlersExt, RpcTransactionError, RpcTransactionOutput,
 };
 
-pub mod mock;
+// TODO: Replace `PrimaryTestNode` with `mock::MockPrimaryNode` once all the existing tests
+// integrated with the new testing framework.
+#[allow(dead_code)]
+mod mock;
 
 /// Create a Subspace `Configuration`.
 ///
