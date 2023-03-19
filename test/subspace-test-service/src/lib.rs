@@ -59,7 +59,7 @@ use substrate_test_client::{
 // TODO: Replace `PrimaryTestNode` with `mock::MockPrimaryNode` once all the existing tests
 // integrated with the new testing framework.
 #[allow(dead_code)]
-mod mock;
+pub mod mock;
 
 /// Create a Subspace `Configuration`.
 ///

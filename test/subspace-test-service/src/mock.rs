@@ -21,7 +21,7 @@ use sp_consensus::{BlockOrigin, CacheKeyId, Error as ConsensusError, NoNetwork, 
 use sp_consensus_slots::Slot;
 use sp_consensus_subspace::digests::{CompatibleDigestItem, PreDigest};
 use sp_consensus_subspace::FarmerPublicKey;
-use sp_domains::ExecutorPublicKey;
+use sp_domains::{ExecutorApi, ExecutorPublicKey};
 use sp_inherents::{InherentData, InherentDataProvider};
 use sp_keyring::Sr25519Keyring;
 use sp_runtime::generic::Digest;
@@ -201,11 +201,19 @@ impl MockPrimaryNode {
 
     /// Wait until a bundle that created by `author_key` at `slot` have submitted to the
     /// transaction pool
-    pub async fn wait_for_bundle(
-        &self,
-        slot: u64,
+    pub async fn wait_for_bundle<SClient, SBlock>(
+        &mut self,
         author_key: Sr25519Keyring,
-    ) -> Result<(), Box<dyn Error>> {
+        system_domain_client: &SClient,
+    ) -> Result<(), Box<dyn Error>>
+    where
+        SBlock: BlockT,
+        SClient: HeaderBackend<SBlock>,
+    {
+        self.wait_system_domain_catch_up(system_domain_client).await;
+
+        let slot = self.produce_slot().into();
+
         let author_key = ExecutorPublicKey::unchecked_from(author_key.public().0);
         // Check if bundle is already present at the transaction pool
         for ready_tx in self.transaction_pool.ready() {
@@ -225,6 +233,27 @@ impl MockPrimaryNode {
             }
         }
         Ok(())
+    }
+
+    pub async fn wait_system_domain_catch_up<SClient, SBlock>(
+        &self,
+        system_domain_client: &SClient,
+    ) -> Result<(), Box<dyn Error>>
+    where
+        SBlock: BlockT,
+        SClient: HeaderBackend<SBlock>,
+    {
+        let head_receipt_number = self
+            .client
+            .runtime_api()
+            .head_receipt_number(self.client.info().best_hash)?;
+        for _ in 0..100 {
+            if system_domain_client.info().best_number > head_receipt_number.into() {
+                return Ok(());
+            }
+            tokio::time::sleep(time::Duration::from_millis(10)).await;
+        }
+        panic!("System domain fail to catch up");
     }
 
     async fn collect_txn_from_pool(

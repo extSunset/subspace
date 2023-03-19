@@ -115,12 +115,8 @@ async fn fraud_proof_verification_in_tx_pool_should_work() {
 
     // Wait until the domain bundles are submitted and applied to ensure the head
     // receipt number are updated
-    // FIXME: wait_for_bundle may wait forever if alice skip the slot due to lagging behind
-    // its parent chain.
-    // TODO: implement `wait_system_domain_catch_up`
-    let slot = ferdie.produce_slot();
     ferdie
-        .wait_for_bundle(slot.into(), alice.key)
+        .wait_for_bundle(alice.key, alice.client.as_ref())
         .await
         .unwrap();
     futures::join!(alice.wait_for_blocks(1), ferdie.produce_block())
