@@ -1,8 +1,9 @@
 use crate::utils::{to_number_primitive, BlockInfo, ExecutorSlotInfo};
+use crate::BlockImportNotificationForExecutor;
 use codec::{Decode, Encode};
 use futures::channel::mpsc;
 use futures::{SinkExt, Stream, StreamExt};
-use sc_client_api::{BlockBackend, BlockchainEvents};
+use sc_client_api::{BlockBackend, BlockImportNotification, BlockchainEvents};
 use sp_api::{ApiError, BlockT, ProvideRuntimeApi};
 use sp_blockchain::HeaderBackend;
 use sp_domains::{ExecutorApi, SignedOpaqueBundle};
@@ -51,14 +52,14 @@ pub(crate) async fn handle_block_import_notifications<
     PBlock,
     PClient,
     ProcessorFn,
-    BlockImports,
+    IBNS,
+    EINS,
 >(
     primary_chain_client: &PClient,
     best_domain_number: NumberFor<Block>,
     processor: ProcessorFn,
     mut leaves: Vec<(PBlock::Hash, NumberFor<PBlock>)>,
-    mut block_imports: BlockImports,
-    block_import_throttling_buffer_size: u32,
+    block_import_notification: BlockImportNotificationForExecutor<IBNS, EINS>,
 ) where
     Block: BlockT,
     PBlock: BlockT,
@@ -72,7 +73,8 @@ pub(crate) async fn handle_block_import_notifications<
         ) -> Pin<Box<dyn Future<Output = Result<(), sp_blockchain::Error>> + Send>>
         + Send
         + Sync,
-    BlockImports: Stream<Item = (NumberFor<PBlock>, mpsc::Sender<()>)> + Unpin,
+    IBNS: Stream<Item = (NumberFor<PBlock>, mpsc::Sender<()>)> + Send + 'static,
+    EINS: Stream<Item = BlockImportNotification<PBlock>> + Send + 'static,
 {
     let mut active_leaves = HashMap::with_capacity(leaves.len());
 
@@ -92,14 +94,20 @@ pub(crate) async fn handle_block_import_notifications<
         }
     }
 
+    let BlockImportNotificationForExecutor {
+        block_import_throttling_buffer_size,
+        imported_block_notification_stream,
+        every_import_notification_stream,
+    } = block_import_notification;
+    let mut client_block_import = Box::pin(every_import_notification_stream);
+    let mut block_imports = Box::pin(imported_block_notification_stream);
+
     // The primary chain can be ahead of the domain by up to `block_import_throttling_buffer_size/2`
     // blocks, for there are two notifications per block sent to this buffer (one will be actually
     // consumed by the domain processor, the other from `sc-consensus-subspace` is used to discontinue
     // the primary block import in case the primary chain runs much faster than the domain.).
     let (mut block_info_sender, mut block_info_receiver) =
         mpsc::channel(block_import_throttling_buffer_size as usize);
-
-    let mut client_block_import = primary_chain_client.every_import_notification_stream();
 
     loop {
         tokio::select! {

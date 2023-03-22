@@ -2,7 +2,8 @@ use crate::{DomainConfiguration, FullBackend, FullClient};
 use cross_domain_message_gossip::{DomainTxPoolSink, Message as GossipMessage};
 use domain_client_executor::xdm_verifier::CoreDomainXDMVerifier;
 use domain_client_executor::{
-    CoreDomainParentChain, CoreExecutor, CoreGossipMessageValidator, EssentialExecutorParams,
+    BlockImportNotificationForExecutor, CoreDomainParentChain, CoreExecutor,
+    CoreGossipMessageValidator, EssentialExecutorParams,
 };
 use domain_client_executor_gossip::ExecutorGossipParams;
 use domain_client_message_relayer::GossipMessageSink;
@@ -12,7 +13,9 @@ use futures::channel::mpsc;
 use futures::{Stream, StreamExt};
 use jsonrpsee::tracing;
 use pallet_transaction_payment_rpc::TransactionPaymentRuntimeApi;
-use sc_client_api::{BlockBackend, BlockchainEvents, ProofProvider, StateBackendFor};
+use sc_client_api::{
+    BlockBackend, BlockImportNotification, BlockchainEvents, ProofProvider, StateBackendFor,
+};
 use sc_executor::{NativeElseWasmExecutor, NativeExecutionDispatch};
 use sc_network::NetworkService;
 use sc_service::{
@@ -214,7 +217,7 @@ where
     Ok(params)
 }
 
-pub struct CoreDomainParams<SBlock, SClient, PClient, SC, IBNS, NSNS>
+pub struct CoreDomainParams<SBlock, SClient, PClient, SC, IBNS, EINS, NSNS>
 where
     SBlock: BlockT,
 {
@@ -226,6 +229,7 @@ where
     pub primary_network_sync_oracle: Arc<dyn SyncOracle + Send + Sync>,
     pub select_chain: SC,
     pub imported_block_notification_stream: IBNS,
+    pub every_import_notification_stream: EINS,
     pub new_slot_notification_stream: NSNS,
     pub block_import_throttling_buffer_size: u32,
     pub gossip_message_sink: GossipMessageSink,
@@ -242,11 +246,12 @@ pub async fn new_full_core<
     PClient,
     SC,
     IBNS,
+    EINS,
     NSNS,
     RuntimeApi,
     ExecutorDispatch,
 >(
-    core_domain_params: CoreDomainParams<SBlock, SClient, PClient, SC, IBNS, NSNS>,
+    core_domain_params: CoreDomainParams<SBlock, SClient, PClient, SC, IBNS, EINS, NSNS>,
 ) -> sc_service::error::Result<
     NewFullCore<
         Arc<FullClient<RuntimeApi, ExecutorDispatch>>,
@@ -281,6 +286,7 @@ where
     PClient::Api: ExecutorApi<PBlock, Hash>,
     SC: SelectChain<PBlock>,
     IBNS: Stream<Item = (NumberFor<PBlock>, mpsc::Sender<()>)> + Send + 'static,
+    EINS: Stream<Item = BlockImportNotification<PBlock>> + Send + 'static,
     NSNS: Stream<Item = (Slot, Blake2b256Hash)> + Send + 'static,
     RuntimeApi: ConstructRuntimeApi<Block, FullClient<RuntimeApi, ExecutorDispatch>>
         + Send
@@ -307,6 +313,7 @@ where
         primary_network_sync_oracle,
         select_chain,
         imported_block_notification_stream,
+        every_import_notification_stream,
         new_slot_notification_stream,
         block_import_throttling_buffer_size,
         gossip_message_sink,
@@ -399,8 +406,11 @@ where
             keystore: params.keystore_container.sync_keystore(),
             spawner: Box::new(task_manager.spawn_handle()),
             bundle_sender: Arc::new(bundle_sender),
-            block_import_throttling_buffer_size,
-            imported_block_notification_stream,
+            block_import_notification: BlockImportNotificationForExecutor::new(
+                block_import_throttling_buffer_size,
+                imported_block_notification_stream,
+                every_import_notification_stream,
+            ),
             new_slot_notification_stream,
         },
     )

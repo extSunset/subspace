@@ -110,6 +110,7 @@ pub use self::system_gossip_message_validator::SystemGossipMessageValidator;
 use crate::utils::BlockInfo;
 use futures::channel::mpsc;
 use futures::Stream;
+use sc_client_api::BlockImportNotification;
 use sc_utils::mpsc::TracingUnboundedSender;
 use sp_api::ProvideRuntimeApi;
 use sp_blockchain::HeaderBackend;
@@ -150,11 +151,13 @@ pub struct EssentialExecutorParams<
     Backend,
     E,
     IBNS,
+    EINS,
     NSNS,
 > where
     Block: BlockT,
     PBlock: BlockT,
     IBNS: Stream<Item = (NumberFor<PBlock>, mpsc::Sender<()>)> + Send + 'static,
+    EINS: Stream<Item = BlockImportNotification<PBlock>> + Send + 'static,
     NSNS: Stream<Item = (Slot, Blake2b256Hash)> + Send + 'static,
 {
     pub primary_chain_client: Arc<PClient>,
@@ -167,9 +170,28 @@ pub struct EssentialExecutorParams<
     pub keystore: SyncCryptoStorePtr,
     pub spawner: Box<dyn SpawnNamed + Send + Sync>,
     pub bundle_sender: Arc<BundleSender<Block, PBlock>>,
+    pub block_import_notification: BlockImportNotificationForExecutor<IBNS, EINS>,
+    pub new_slot_notification_stream: NSNS,
+}
+
+pub struct BlockImportNotificationForExecutor<IBNS, EINS> {
     pub block_import_throttling_buffer_size: u32,
     pub imported_block_notification_stream: IBNS,
-    pub new_slot_notification_stream: NSNS,
+    pub every_import_notification_stream: EINS,
+}
+
+impl<IBNS, EINS> BlockImportNotificationForExecutor<IBNS, EINS> {
+    pub fn new(
+        block_import_throttling_buffer_size: u32,
+        imported_block_notification_stream: IBNS,
+        every_import_notification_stream: EINS,
+    ) -> Self {
+        BlockImportNotificationForExecutor {
+            block_import_throttling_buffer_size,
+            imported_block_notification_stream,
+            every_import_notification_stream,
+        }
+    }
 }
 
 /// Returns the active leaves the overseer should start with.

@@ -2,7 +2,8 @@ use crate::{DomainConfiguration, FullBackend, FullClient};
 use cross_domain_message_gossip::{DomainTxPoolSink, Message as GossipMessage};
 use domain_client_executor::xdm_verifier::SystemDomainXDMVerifier;
 use domain_client_executor::{
-    EssentialExecutorParams, SystemDomainParentChain, SystemExecutor, SystemGossipMessageValidator,
+    BlockImportNotificationForExecutor, EssentialExecutorParams, SystemDomainParentChain,
+    SystemExecutor, SystemGossipMessageValidator,
 };
 use domain_client_executor_gossip::ExecutorGossipParams;
 use domain_client_message_relayer::GossipMessageSink;
@@ -12,7 +13,7 @@ use futures::channel::mpsc;
 use futures::{Stream, StreamExt};
 use jsonrpsee::tracing;
 use pallet_transaction_payment_rpc::TransactionPaymentRuntimeApi;
-use sc_client_api::{BlockBackend, BlockchainEvents, StateBackendFor};
+use sc_client_api::{BlockBackend, BlockImportNotification, BlockchainEvents, StateBackendFor};
 use sc_executor::{NativeElseWasmExecutor, NativeExecutionDispatch};
 use sc_service::{
     BuildNetworkParams, Configuration as ServiceConfiguration, NetworkStarter, PartialComponents,
@@ -242,12 +243,13 @@ where
 ///
 /// This is the actual implementation that is abstract over the executor and the runtime api.
 #[allow(clippy::too_many_arguments)]
-pub async fn new_full_system<PBlock, PClient, SC, IBNS, NSNS, RuntimeApi, ExecutorDispatch>(
+pub async fn new_full_system<PBlock, PClient, SC, IBNS, EINS, NSNS, RuntimeApi, ExecutorDispatch>(
     mut system_domain_config: DomainConfiguration,
     primary_chain_client: Arc<PClient>,
     primary_network_sync_oracle: Arc<dyn SyncOracle + Send + Sync>,
     select_chain: &SC,
     imported_block_notification_stream: IBNS,
+    every_import_notification_stream: EINS,
     new_slot_notification_stream: NSNS,
     block_import_throttling_buffer_size: u32,
     gossip_message_sink: GossipMessageSink,
@@ -276,6 +278,7 @@ where
     PClient::Api: ExecutorApi<PBlock, Hash>,
     SC: SelectChain<PBlock>,
     IBNS: Stream<Item = (NumberFor<PBlock>, mpsc::Sender<()>)> + Send + 'static,
+    EINS: Stream<Item = BlockImportNotification<PBlock>> + Send + 'static,
     NSNS: Stream<Item = (Slot, Blake2b256Hash)> + Send + 'static,
     RuntimeApi: ConstructRuntimeApi<Block, FullClient<RuntimeApi, ExecutorDispatch>>
         + Send
@@ -381,8 +384,11 @@ where
             keystore: params.keystore_container.sync_keystore(),
             spawner: Box::new(task_manager.spawn_handle()),
             bundle_sender: Arc::new(bundle_sender),
-            block_import_throttling_buffer_size,
-            imported_block_notification_stream,
+            block_import_notification: BlockImportNotificationForExecutor::new(
+                block_import_throttling_buffer_size,
+                imported_block_notification_stream,
+                every_import_notification_stream,
+            ),
             new_slot_notification_stream,
         },
     )

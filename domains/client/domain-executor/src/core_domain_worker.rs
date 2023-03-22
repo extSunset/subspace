@@ -19,11 +19,14 @@ use crate::domain_bundle_producer::DomainBundleProducer;
 use crate::domain_worker::{handle_block_import_notifications, handle_slot_notifications};
 use crate::parent_chain::CoreDomainParentChain;
 use crate::utils::{BlockInfo, ExecutorSlotInfo};
-use crate::TransactionFor;
+use crate::{BlockImportNotificationForExecutor, TransactionFor};
 use domain_runtime_primitives::{AccountId, DomainCoreApi};
 use futures::channel::mpsc;
 use futures::{future, FutureExt, Stream, StreamExt, TryFutureExt};
-use sc_client_api::{AuxStore, BlockBackend, BlockchainEvents, ProofProvider, StateBackendFor};
+use sc_client_api::{
+    AuxStore, BlockBackend, BlockImportNotification, BlockchainEvents, ProofProvider,
+    StateBackendFor,
+};
 use sc_consensus::BlockImport;
 use sp_api::{BlockT, ProvideRuntimeApi};
 use sp_block_builder::BlockBuilder;
@@ -50,6 +53,7 @@ pub(super) async fn start_worker<
     TransactionPool,
     Backend,
     IBNS,
+    EINS,
     NSNS,
     E,
 >(
@@ -76,10 +80,9 @@ pub(super) async fn start_worker<
         Backend,
         E,
     >,
-    imported_block_notification_stream: IBNS,
+    block_import_notification: BlockImportNotificationForExecutor<IBNS, EINS>,
     new_slot_notification_stream: NSNS,
     active_leaves: Vec<BlockInfo<PBlock>>,
-    block_import_throttling_buffer_size: u32,
 ) where
     Block: BlockT,
     SBlock: BlockT,
@@ -113,6 +116,7 @@ pub(super) async fn start_worker<
     TransactionPool: sc_transaction_pool_api::TransactionPool<Block = Block> + 'static,
     Backend: sc_client_api::Backend<Block> + 'static,
     IBNS: Stream<Item = (NumberFor<PBlock>, mpsc::Sender<()>)> + Send + 'static,
+    EINS: Stream<Item = BlockImportNotification<PBlock>> + Send + 'static,
     NSNS: Stream<Item = (Slot, Blake2b256Hash)> + Send + 'static,
     TransactionFor<Backend, Block>: sp_trie::HashDBT<HashFor<Block>, sp_trie::DBValue>,
     E: CodeExecutor,
@@ -120,7 +124,7 @@ pub(super) async fn start_worker<
     let span = tracing::Span::current();
 
     let handle_block_import_notifications_fut =
-        handle_block_import_notifications::<Block, PBlock, _, _, _>(
+        handle_block_import_notifications::<Block, PBlock, _, _, _, _>(
             primary_chain_client.as_ref(),
             client.info().best_number,
             {
@@ -144,8 +148,7 @@ pub(super) async fn start_worker<
                      }| (hash, number),
                 )
                 .collect(),
-            Box::pin(imported_block_notification_stream),
-            block_import_throttling_buffer_size,
+            block_import_notification,
         );
     let handle_slot_notifications_fut = handle_slot_notifications::<Block, PBlock, _, _>(
         primary_chain_client.as_ref(),

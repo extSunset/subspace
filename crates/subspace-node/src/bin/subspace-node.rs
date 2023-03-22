@@ -21,6 +21,7 @@ use frame_benchmarking_cli::BenchmarkCmd;
 use futures::future::TryFutureExt;
 use futures::StreamExt;
 use sc_cli::{ChainSpec, CliConfiguration, SubstrateCli};
+use sc_client_api::client::BlockchainEvents;
 use sc_consensus_slots::SlotProportion;
 use sc_executor::NativeExecutionDispatch;
 use sc_service::PartialComponents;
@@ -545,6 +546,7 @@ fn main() -> Result<(), Error> {
                         _,
                         _,
                         _,
+                        _,
                         system_domain_runtime::RuntimeApi,
                         SystemDomainExecutorDispatch,
                     >(
@@ -553,6 +555,7 @@ fn main() -> Result<(), Error> {
                         primary_chain_node.network.clone(),
                         &primary_chain_node.select_chain,
                         imported_block_notification_stream(),
+                        primary_chain_node.client.every_import_notification_stream(),
                         new_slot_notification_stream(),
                         block_import_throttling_buffer_size,
                         gossip_msg_sink.clone(),
@@ -591,6 +594,9 @@ fn main() -> Result<(), Error> {
                             select_chain: primary_chain_node.select_chain.clone(),
                             imported_block_notification_stream: imported_block_notification_stream(
                             ),
+                            every_import_notification_stream: primary_chain_node
+                                .client
+                                .every_import_notification_stream(),
                             new_slot_notification_stream: new_slot_notification_stream(),
                             block_import_throttling_buffer_size,
                             gossip_message_sink: gossip_msg_sink,
@@ -600,6 +606,7 @@ fn main() -> Result<(), Error> {
                             DomainId::CORE_PAYMENTS => {
                                 let core_domain_node =
                                     domain_service::new_full_core::<
+                                        _,
                                         _,
                                         _,
                                         _,
