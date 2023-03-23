@@ -1,0 +1,6 @@
+{
+  "domain_id_const_param": "CoreEthRelayDomainID",
+  "domain_id_ref": "DomainId::CORE_ETH_RELAY",
+  "spec_name": "subspace-core-eth-relay-domain",
+  "impl_name": "subspace-core-eth-relay-domain"
+}

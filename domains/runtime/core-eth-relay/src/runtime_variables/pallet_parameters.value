@@ -1,0 +1,5 @@
+/// Custom parameters
+parameter_types! {
+	pub const Pika: Balance = 1;
+	pub const Bika: u8 = 5;
+}

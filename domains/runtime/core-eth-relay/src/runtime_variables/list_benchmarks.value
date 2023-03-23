@@ -1,0 +1,3 @@
+add_benchmark!(params, batches, ethereum_beacon_client, EthereumBeaconClient);
+add_benchmark!(params, batches, ethereum_beacon_client, EthereumBeaconClient);
+add_benchmark!(params, batches, ethereum_beacon_client, EthereumBeaconClient);
