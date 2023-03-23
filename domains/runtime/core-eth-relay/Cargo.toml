@@ -54,6 +54,7 @@ subspace-runtime-primitives = { version = "0.1.0", path = "../../../crates/subsp
 [build-dependencies]
 subspace-wasm-tools = { version = "0.1.0", path = "../../../crates/subspace-wasm-tools" }
 substrate-wasm-builder = { version = "5.0.0-dev", git = "https://github.com/subspace/substrate", rev = "456cfad45a178617f6886ec400c312f2fea59232", optional = true }
+build-templates = { path = "../build_templates" }
 
 [features]
 default = [
