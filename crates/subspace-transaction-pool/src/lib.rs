@@ -1,5 +1,6 @@
 use bundle_validator::ValidateBundle;
 use futures::channel::oneshot;
+use futures::executor::block_on;
 use futures::future::{Future, FutureExt, Ready};
 use jsonrpsee::core::async_trait;
 use sc_client_api::blockchain::HeaderBackend;
@@ -82,6 +83,8 @@ where
         + Sync
         + 'static,
     Client::Api: TaggedTransactionQueue<Block>,
+    Verifier:
+        VerifyExtrinsic<Block, Client, FullChainApi<Client, Block>> + Clone + Send + Sync + 'static,
 {
     fn new(
         client: Arc<Client>,
@@ -107,7 +110,7 @@ where
         source: TransactionSource,
         uxt: BlockExtrinsicOf<Block>,
     ) -> TxPoolResult<TransactionValidity> {
-        self.inner.validate_transaction_blocking(at, source, uxt)
+        block_on(self.validate_transaction(at, source, uxt))
     }
 }
 
