@@ -60,6 +60,7 @@ subspace-core-primitives = { version = "0.1.0", default-features = false, path =
 subspace-runtime-primitives = { version = "0.1.0", default-features = false, path = "../subspace-runtime-primitives" }
 subspace-verification = { version = "0.1.0", default-features = false, path = "../subspace-verification" }
 system-domain-runtime = { version = "0.1.0", default-features = false, path = "../../domains/runtime/system" }
+log = { version = "0.4.17", default-features = false }
 
 [build-dependencies]
 subspace-wasm-tools = { version = "0.1.0", path = "../subspace-wasm-tools" }

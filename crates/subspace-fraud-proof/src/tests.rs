@@ -109,7 +109,7 @@ async fn execution_proof_creation_and_verification_should_work() {
 
     // Wait until all tx included in the domain bundle and it is submitted to `ferdie`
     ferdie
-        .wait_for_bundle(alice.key, alice.client.as_ref())
+        .wait_for_bundle(alice.key, &alice.client)
         .await
         .unwrap();
     // Wait for `alice` to apply these tx
@@ -410,7 +410,7 @@ async fn invalid_execution_proof_should_not_work() {
 
     // Wait until the test txs are included in the domain bundle
     ferdie
-        .wait_for_bundle(alice.key, alice.client.as_ref())
+        .wait_for_bundle(alice.key, &alice.client)
         .await
         .unwrap();
     // Wait for `alice` to apply these tx

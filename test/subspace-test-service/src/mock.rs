@@ -3,7 +3,7 @@ use codec::{Decode, Encode};
 use futures::channel::mpsc;
 use futures::{select, FutureExt, StreamExt};
 use sc_block_builder::BlockBuilderProvider;
-use sc_client_api::{backend, BlockBackend};
+use sc_client_api::{backend, BlockBackend, BlockchainEvents};
 use sc_consensus::block_import::{
     BlockCheckParams, BlockImportParams, ForkChoiceStrategy, ImportResult,
 };
@@ -98,7 +98,7 @@ impl MockPrimaryNode {
 
         let select_chain = sc_consensus::LongestChain::new(backend.clone());
 
-        let bundle_validator = BundleValidator::new(client.clone());
+        let mut bundle_validator = BundleValidator::new(client.clone());
 
         let proof_verifier = subspace_fraud_proof::ProofVerifier::new(
             client.clone(),
@@ -110,8 +110,31 @@ impl MockPrimaryNode {
             &task_manager,
             client.clone(),
             proof_verifier.clone(),
-            bundle_validator,
+            bundle_validator.clone(),
         );
+
+        let mut imported_blocks_stream = client.import_notification_stream();
+        task_manager.spawn_handle().spawn(
+            "maintain-bundles-stored-in-last-k",
+            None,
+            Box::pin(async move {
+                while let Some(incoming_block) = imported_blocks_stream.next().await {
+                    if incoming_block.is_new_best {
+                        bundle_validator.update_recent_stored_bundles(incoming_block.hash);
+                    }
+                }
+            }),
+        );
+
+        // Inform the tx pool about imported and finalized blocks.
+        task_manager.spawn_handle().spawn(
+            "txpool-notifications",
+            Some("transaction-pool"),
+            sc_transaction_pool::notification_future(client.clone(), transaction_pool.clone()),
+        );
+
+        // TODO: check whether workers are needed: offchain-on-block, offchain-notifications,, on-transaction-imported
+        // informant
 
         let fraud_proof_block_import =
             sc_consensus_fraud_proof::block_import(client.clone(), client.clone(), proof_verifier);
@@ -204,13 +227,13 @@ impl MockPrimaryNode {
     pub async fn wait_for_bundle<SClient, SBlock>(
         &mut self,
         author_key: Sr25519Keyring,
-        system_domain_client: &SClient,
-    ) -> Result<(), Box<dyn Error>>
+        system_domain_client: &Arc<SClient>,
+    ) -> Result<<Block as BlockT>::Hash, Box<dyn Error>>
     where
         SBlock: BlockT,
         SClient: HeaderBackend<SBlock>,
     {
-        self.wait_system_domain_catch_up(system_domain_client).await;
+        self.wait_system_domain_catch_up(system_domain_client).await?;
 
         let slot = self.produce_slot().into();
 
@@ -218,26 +241,26 @@ impl MockPrimaryNode {
         // Check if bundle is already present at the transaction pool
         for ready_tx in self.transaction_pool.ready() {
             if is_bundle_match(ready_tx.data.encode().as_slice(), slot, &author_key)? {
-                return Ok(());
+                return Ok(ready_tx.hash);
             }
         }
         // Check incoming transactions
         let mut import_tx_stream = self.transaction_pool.import_notification_stream();
-        while let Some(ready_tx) = import_tx_stream.next().await {
+        while let Some(ready_tx_hash) = import_tx_stream.next().await {
             let tx = self
                 .transaction_pool
-                .ready_transaction(&ready_tx)
+                .ready_transaction(&ready_tx_hash)
                 .expect("tx must exist as we just got notified; ped");
             if is_bundle_match(tx.data.encode().as_slice(), slot, &author_key)? {
-                return Ok(());
+                return Ok(ready_tx_hash);
             }
         }
-        Ok(())
+        unreachable!()
     }
 
     pub async fn wait_system_domain_catch_up<SClient, SBlock>(
         &self,
-        system_domain_client: &SClient,
+        system_domain_client: &Arc<SClient>,
     ) -> Result<(), Box<dyn Error>>
     where
         SBlock: BlockT,

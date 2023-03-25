@@ -6,7 +6,8 @@ use domain_test_service::Keyring::{Alice, Bob, Ferdie};
 use sc_client_api::{BlockBackend, HeaderBackend};
 use sc_executor_common::runtime_blob::RuntimeBlob;
 use sc_service::{BasePath, Role};
-use sc_transaction_pool_api::TransactionSource;
+use sc_transaction_pool_api::error::Error as TxPoolError;
+use sc_transaction_pool_api::{TransactionPool, TransactionSource};
 use sp_api::ProvideRuntimeApi;
 use sp_core::Pair;
 use sp_domain_digests::AsPredigest;
@@ -19,6 +20,7 @@ use sp_domains::{
 use sp_runtime::generic::{BlockId, Digest, DigestItem};
 use sp_runtime::traits::{BlakeTwo256, Hash as HashT, Header as HeaderT};
 use subspace_core_primitives::BlockNumber;
+use subspace_test_runtime;
 use subspace_wasm_tools::read_core_domain_runtime_blob;
 use tempfile::TempDir;
 
@@ -116,7 +118,7 @@ async fn fraud_proof_verification_in_tx_pool_should_work() {
     // Wait until the domain bundles are submitted and applied to ensure the head
     // receipt number are updated
     ferdie
-        .wait_for_bundle(alice.key, alice.client.as_ref())
+        .wait_for_bundle(alice.key, &alice.client)
         .await
         .unwrap();
     futures::join!(alice.wait_for_blocks(1), ferdie.produce_block())
@@ -486,4 +488,103 @@ async fn pallet_domains_unsigned_extrinsics_should_work() {
             .unwrap(),
         3,
     );
+}
+
+#[substrate_test_utils::test(flavor = "multi_thread")]
+async fn duplicated_and_stale_bundle_should_be_discarded() {
+    let directory = TempDir::new().expect("Must be able to create temporary directory");
+
+    let mut builder = sc_cli::LoggerBuilder::new("");
+    builder.with_colors(false);
+    let _ = builder.init();
+
+    let tokio_handle = tokio::runtime::Handle::current();
+
+    // Start Ferdie
+    let mut ferdie = run_mock_primary_chain_validator_node(
+        tokio_handle.clone(),
+        Ferdie,
+        BasePath::new(directory.path().join("ferdie")),
+    )
+    .await;
+
+    // Run Alice (a system domain authority node)
+    let alice = domain_test_service::SystemDomainNodeBuilder::new(
+        tokio_handle.clone(),
+        Alice,
+        BasePath::new(directory.path().join("alice")),
+    )
+    .build_with_mock(Role::Authority, &ferdie)
+    .await;
+
+    futures::join!(alice.wait_for_blocks(1), ferdie.produce_n_blocks(1))
+        .1
+        .unwrap();
+
+    let bundle_hash = ferdie
+        .wait_for_bundle(alice.key, &alice.client)
+        .await
+        .unwrap();
+
+    let bundle_tx = ferdie
+        .transaction_pool
+        .ready_transaction(&bundle_hash)
+        .unwrap()
+        .data
+        .clone();
+
+    // Wait one block to ensure the bundle is stored onchain
+    futures::join!(alice.wait_for_blocks(1), ferdie.produce_n_blocks(1))
+        .1
+        .unwrap();
+    // Recent imported txn are temporarily baned from including into the pool again,
+    // although the `ban_time` have set to 0 we need to wait for one more block to
+    // ensure the temporary bans are updated
+    futures::join!(alice.wait_for_blocks(1), ferdie.produce_n_blocks(1))
+        .1
+        .unwrap();
+
+    // Bundle is discarded due to it is duplicated
+    let res = ferdie
+        .transaction_pool
+        .pool()
+        .submit_one(
+            &BlockId::Hash(ferdie.client.info().best_hash),
+            TransactionSource::External,
+            bundle_tx.clone(),
+        )
+        .await;
+    match res.unwrap_err() {
+        sc_transaction_pool::error::Error::Pool(err) => {
+            // Compare the error message of `TxPoolError::ImmediatelyDropped` here because
+            // the upstream `TxPoolError` didn't drive `PartialEq`
+            assert_eq!(
+                &err.to_string(),
+                "Transaction couldn't enter the pool because of the limit"
+            );
+        }
+        e => panic!("Unexpected error: {e}"),
+    }
+
+    // Wait for K blocks (the confirmation depth is 100 in test)
+    futures::join!(alice.wait_for_blocks(100), ferdie.produce_n_blocks(100))
+        .1
+        .unwrap();
+
+    // Bundle is now discarded due to it is stale
+    let res = ferdie
+        .transaction_pool
+        .pool()
+        .submit_one(
+            &BlockId::Hash(ferdie.client.info().best_hash),
+            TransactionSource::External,
+            bundle_tx.clone(),
+        )
+        .await;
+    match res.unwrap_err() {
+        sc_transaction_pool::error::Error::Pool(TxPoolError::InvalidTransaction(invalid_tx)) => {
+            assert_eq!(invalid_tx, InvalidTransactionCode::Bundle.into())
+        }
+        e => panic!("Unexpected error: {e}"),
+    }
 }

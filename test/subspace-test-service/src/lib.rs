@@ -32,6 +32,7 @@ use sc_service::config::{
 use sc_service::{
     BasePath, BlocksPruning, Configuration, NetworkStarter, Role, RpcHandlers, TaskManager,
 };
+use sc_transaction_pool::Options as TransactionPoolOptions;
 use sp_arithmetic::traits::SaturatedConversion;
 use sp_blockchain::HeaderBackend;
 use sp_keyring::Sr25519Keyring;
@@ -103,12 +104,15 @@ pub fn node_config(
 
     network_config.force_synced = force_synced;
 
+    let mut transaction_pool = TransactionPoolOptions::default();
+    transaction_pool.ban_time = std::time::Duration::from_millis(0);
+
     Configuration {
         impl_name: "subspace-test-node".to_string(),
         impl_version: "0.1".to_string(),
         role,
         tokio_handle,
-        transaction_pool: Default::default(),
+        transaction_pool,
         network: network_config,
         keystore: KeystoreConfig::InMemory,
         keystore_remote: Default::default(),
