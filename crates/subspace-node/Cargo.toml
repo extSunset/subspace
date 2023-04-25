@@ -22,15 +22,16 @@ targets = ["x86_64-unknown-linux-gnu"]
 [dependencies]
 bytesize = "1.2.0"
 clap = { version = "4.2.1", features = ["derive"] }
-cross-domain-message-gossip = { version = "0.1.0", path = "../../domains/client/cross-domain-message-gossip" }
 core-eth-relay-runtime = { version = "0.1.0", path = "../../domains/runtime/core-eth-relay" }
 core-evm-runtime = { version = "0.1.0", path = "../../domains/runtime/core-evm" }
 core-payments-domain-runtime = { version = "0.1.0", path = "../../domains/runtime/core-payments" }
+cross-domain-message-gossip = { version = "0.1.0", path = "../../domains/client/cross-domain-message-gossip" }
 dirs = "5.0.0"
 domain-client-executor = { version = "0.1.0", path = "../../domains/client/domain-executor" }
 domain-eth-service = { version = "0.1.0", path = "../../domains/client/eth-service" }
-domain-service = { version = "0.1.0", path = "../../domains/service" }
 domain-runtime-primitives = { version = "0.1.0", path = "../../domains/primitives/runtime" }
+domain-service = { version = "0.1.0", path = "../../domains/service" }
+fp-evm = { version = "3.0.0-dev", git = "https://github.com/subspace/frontier", rev = "e60f3f8617cabd3473bd5e197b7c0c1991fbcd9b" }
 frame-benchmarking = { version = "4.0.0-dev", git = "https://github.com/subspace/substrate", rev = "fdb68194ab6995447610b3dbdee70559711dbd63", default-features = false }
 frame-benchmarking-cli = { version = "4.0.0-dev", git = "https://github.com/subspace/substrate", rev = "fdb68194ab6995447610b3dbdee70559711dbd63", default-features = false }
 frame-support = { version = "4.0.0-dev", git = "https://github.com/subspace/substrate", rev = "fdb68194ab6995447610b3dbdee70559711dbd63" }
@@ -44,10 +45,10 @@ sc-client-api = { version = "4.0.0-dev", git = "https://github.com/subspace/subs
 sc-consensus = { version = "0.10.0-dev", git = "https://github.com/subspace/substrate", rev = "fdb68194ab6995447610b3dbdee70559711dbd63" }
 sc-consensus-slots = { version = "0.10.0-dev", git = "https://github.com/subspace/substrate", rev = "fdb68194ab6995447610b3dbdee70559711dbd63" }
 sc-consensus-subspace = { version = "0.1.0", path = "../sc-consensus-subspace" }
-sc-subspace-chain-specs = { version = "0.1.0", path = "../sc-subspace-chain-specs" }
 sc-executor = { version = "0.10.0-dev", git = "https://github.com/subspace/substrate", rev = "fdb68194ab6995447610b3dbdee70559711dbd63" }
 sc-service = { version = "0.10.0-dev", git = "https://github.com/subspace/substrate", rev = "fdb68194ab6995447610b3dbdee70559711dbd63", default-features = false }
 sc-storage-monitor = { version = "0.1.0", git = "https://github.com/subspace/substrate", rev = "fdb68194ab6995447610b3dbdee70559711dbd63", default-features = false }
+sc-subspace-chain-specs = { version = "0.1.0", path = "../sc-subspace-chain-specs" }
 sc-telemetry = { version = "4.0.0-dev", git = "https://github.com/subspace/substrate", rev = "fdb68194ab6995447610b3dbdee70559711dbd63" }
 sc-tracing = { version = "4.0.0-dev", git = "https://github.com/subspace/substrate", rev = "fdb68194ab6995447610b3dbdee70559711dbd63" }
 sc-utils = { version = "4.0.0-dev", git = "https://github.com/subspace/substrate", rev = "fdb68194ab6995447610b3dbdee70559711dbd63" }

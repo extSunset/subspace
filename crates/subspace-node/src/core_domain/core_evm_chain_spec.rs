@@ -247,7 +247,22 @@ fn testnet_genesis(
         },
         messenger: MessengerConfig { relayers },
         evm_chain_id: EVMChainIdConfig { chain_id },
-        evm: Default::default(),
+        evm: core_evm_runtime::EVMConfig {
+            accounts: [(
+                    // Example
+                    sp_core::H160::from_str("63FaC9201494f0bd17B9892B9fae4d52fe3BD377")
+                        .expect("internal H160 is valid; qed"),
+                    fp_evm::GenesisAccount {
+                        balance: sp_core::U256::from_str("0xffffffffffffffffffffffffffffffff")
+                            .expect("internal U256 is valid; qed"),
+                        code: Default::default(),
+                        nonce: Default::default(),
+                        storage: Default::default(),
+                    },
+                )]
+            .into_iter()
+            .collect(),
+        },
         ethereum: Default::default(),
         dynamic_fee: Default::default(),
         base_fee: Default::default(),
