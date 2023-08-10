@@ -65,6 +65,22 @@ pub fn create_domain_spec(
             genesis_config.system.code = runtime_code;
             genesis_config.self_domain_id.domain_id = Some(domain_id);
 
+            use sp_runtime::traits::{BlakeTwo256, Hash};
+            use sp_runtime::BuildStorage;
+            let mut genesis_storage = Vec::new();
+            for (mut k, mut v) in genesis_config.build_storage().unwrap().top.into_iter() {
+                genesis_storage.append(&mut k);
+                genesis_storage.append(&mut v);
+            }
+            tracing::info!(
+                "operator node, genesis config hash {:?}",
+                BlakeTwo256::hash_of(&serde_json::to_vec(&genesis_config).unwrap())
+            );
+            tracing::info!(
+                "operator node, genesis storage hash {:?}",
+                BlakeTwo256::hash_of(&genesis_storage)
+            );
+
             load_chain_spec_with(genesis_config)
         }
     }

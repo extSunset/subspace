@@ -105,6 +105,23 @@ where
                 };
                 runtime_cfg.system.code = runtime_code;
                 runtime_cfg.self_domain_id.domain_id = Some(domain_id);
+
+                use sp_runtime::traits::{BlakeTwo256, Hash};
+                use sp_runtime::BuildStorage;
+                let mut genesis_storage = Vec::new();
+                for (mut k, mut v) in runtime_cfg.build_storage().unwrap().top.into_iter() {
+                    genesis_storage.append(&mut k);
+                    genesis_storage.append(&mut v);
+                }
+                log::info!(
+                    "consensus chain host function, genesis config hash {:?}",
+                    BlakeTwo256::hash_of(&serde_json::to_vec(&runtime_cfg).unwrap())
+                );
+                log::info!(
+                    "consensus chain host function, genesis storage hash {:?}",
+                    BlakeTwo256::hash_of(&genesis_storage)
+                );
+
                 GenesisBlockBuilder::new(
                     &runtime_cfg,
                     false,
