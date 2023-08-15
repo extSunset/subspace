@@ -56,7 +56,7 @@ use sp_consensus_subspace::digests::{CompatibleDigestItem, PreDigest};
 use sp_consensus_subspace::FarmerPublicKey;
 use sp_core::traits::SpawnEssentialNamed;
 use sp_core::H256;
-use sp_domains::{GenerateGenesisStateRoot, GenesisReceiptExtension, OpaqueBundle};
+use sp_domains::{GenerateGenesisState, GenesisStateExtension, OpaqueBundle};
 use sp_externalities::Extensions;
 use sp_inherents::{InherentData, InherentDataProvider};
 use sp_keyring::Sr25519Keyring;
@@ -181,7 +181,7 @@ type StorageChanges = sp_api::StorageChanges<backend::StateBackendFor<Backend, B
 
 type TxPreValidator = ConsensusChainTxPreValidator<Block, Client, FraudProofVerifier>;
 
-struct MockExtensionsFactory(Arc<dyn GenerateGenesisStateRoot>);
+struct MockExtensionsFactory(Arc<dyn GenerateGenesisState>);
 
 impl<Block> ExtensionsFactory<Block> for MockExtensionsFactory
 where
@@ -194,7 +194,7 @@ where
         _capabilities: sp_core::offchain::Capabilities,
     ) -> Extensions {
         let mut exts = Extensions::new();
-        exts.register(GenesisReceiptExtension::new(self.0.clone()));
+        exts.register(GenesisStateExtension::new(self.0.clone()));
         exts
     }
 }

@@ -980,7 +980,7 @@ mod pallet {
     #[pallet::genesis_build]
     impl<T: Config> GenesisBuild<T> for GenesisConfig<T> {
         fn build(&self) {
-            // Delay the genesis domain register to block #1 due to the required `GenesisReceiptExtension` is not
+            // Delay the genesis domain register to block #1 due to the required `GenesisStateExtension` is not
             // registered during genesis storage build, remove once https://github.com/paritytech/substrate/issues/14541
             // is resolved.
             if let Some(genesis_domain) = &self.genesis_domain {

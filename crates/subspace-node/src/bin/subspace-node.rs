@@ -27,7 +27,7 @@ use sc_service::PartialComponents;
 use sc_storage_monitor::StorageMonitorService;
 use sp_core::crypto::Ss58AddressFormat;
 use sp_core::traits::SpawnEssentialNamed;
-use sp_domains::GenerateGenesisStateRoot;
+use sp_domains::GenerateGenesisState;
 use std::sync::Arc;
 use subspace_node::domain::{
     AccountId32ToAccountId20Converter, DomainCli, DomainGenesisBlockBuilder, DomainInstanceStarter,
@@ -432,7 +432,7 @@ fn main() -> Result<(), Error> {
                     };
 
                     let construct_domain_genesis_block_builder =
-                        |backend, executor| -> Arc<dyn GenerateGenesisStateRoot> {
+                        |backend, executor| -> Arc<dyn GenerateGenesisState> {
                             Arc::new(DomainGenesisBlockBuilder::new(backend, executor))
                         };
                     let partial_components =

@@ -69,7 +69,7 @@ use sp_consensus_subspace::{FarmerPublicKey, KzgExtension, PosExtension, Subspac
 use sp_core::offchain;
 use sp_core::traits::SpawnEssentialNamed;
 use sp_domains::transaction::PreValidationObjectApi;
-use sp_domains::{DomainsApi, GenerateGenesisStateRoot, GenesisReceiptExtension};
+use sp_domains::{DomainsApi, GenerateGenesisState, GenesisStateExtension};
 use sp_externalities::Extensions;
 use sp_objects::ObjectsApi;
 use sp_offchain::OffchainWorkerApi;
@@ -201,7 +201,7 @@ pub struct SubspaceConfiguration {
 
 struct SubspaceExtensionsFactory<PosTable> {
     kzg: Kzg,
-    domain_genesis_receipt_ext: Option<Arc<dyn GenerateGenesisStateRoot>>,
+    domain_genesis_receipt_ext: Option<Arc<dyn GenerateGenesisState>>,
     _pos_table: PhantomData<PosTable>,
 }
 
@@ -220,7 +220,7 @@ where
         exts.register(KzgExtension::new(self.kzg.clone()));
         exts.register(PosExtension::new::<PosTable>());
         if let Some(ext) = self.domain_genesis_receipt_ext.clone() {
-            exts.register(GenesisReceiptExtension::new(ext));
+            exts.register(GenesisStateExtension::new(ext));
         }
         exts
     }
@@ -234,7 +234,7 @@ pub fn new_partial<PosTable, RuntimeApi, ExecutorDispatch>(
         &dyn Fn(
             Arc<FullBackend>,
             NativeElseWasmExecutor<ExecutorDispatch>,
-        ) -> Arc<dyn GenerateGenesisStateRoot>,
+        ) -> Arc<dyn GenerateGenesisState>,
     >,
     pot_components: Option<PotComponents>,
 ) -> Result<

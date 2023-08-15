@@ -620,26 +620,39 @@ impl PassBy for DomainInstanceData {
     type PassBy = pass_by::Codec<Self>;
 }
 
+// The genesis state returned by the `generate_genesis_state` host function
+#[derive(Default, PartialEq, Eq, Clone, Encode, Decode, TypeInfo)]
+pub struct GenesisState {
+    // The genesis state root of the domain
+    pub genesis_state_root: H256,
+    // The `crate::storage::RawGenesis` encoded in json format.
+    pub raw_genesis_storage: Vec<u8>,
+}
+
+impl PassBy for GenesisState {
+    type PassBy = pass_by::Codec<Self>;
+}
+
 #[cfg(feature = "std")]
-pub trait GenerateGenesisStateRoot: Send + Sync {
+pub trait GenerateGenesisState: Send + Sync {
     /// Returns the state root of genesis block built from the runtime genesis config on success.
-    fn generate_genesis_state_root(
+    fn generate_genesis_state(
         &self,
         domain_id: DomainId,
         domain_instance_data: DomainInstanceData,
-    ) -> Option<H256>;
+    ) -> Option<GenesisState>;
 }
 
 #[cfg(feature = "std")]
 sp_externalities::decl_extension! {
     /// A domain genesis receipt extension.
-    pub struct GenesisReceiptExtension(std::sync::Arc<dyn GenerateGenesisStateRoot>);
+    pub struct GenesisStateExtension(std::sync::Arc<dyn GenerateGenesisState>);
 }
 
 #[cfg(feature = "std")]
-impl GenesisReceiptExtension {
-    /// Create a new instance of [`GenesisReceiptExtension`].
-    pub fn new(inner: std::sync::Arc<dyn GenerateGenesisStateRoot>) -> Self {
+impl GenesisStateExtension {
+    /// Create a new instance of [`GenesisStateExtension`].
+    pub fn new(inner: std::sync::Arc<dyn GenerateGenesisState>) -> Self {
         Self(inner)
     }
 }
@@ -647,16 +660,16 @@ impl GenesisReceiptExtension {
 /// Domain-related runtime interface
 #[runtime_interface]
 pub trait Domain {
-    fn generate_genesis_state_root(
+    fn generate_genesis_state(
         &mut self,
         domain_id: DomainId,
         domain_instance_data: DomainInstanceData,
-    ) -> Option<H256> {
+    ) -> Option<GenesisState> {
         use sp_externalities::ExternalitiesExt;
 
-        self.extension::<GenesisReceiptExtension>()
-            .expect("No `GenesisReceiptExtension` associated for the current context!")
-            .generate_genesis_state_root(domain_id, domain_instance_data)
+        self.extension::<GenesisStateExtension>()
+            .expect("No `GenesisStateExtension` associated for the current context!")
+            .generate_genesis_state(domain_id, domain_instance_data)
     }
 }
 

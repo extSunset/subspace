@@ -119,21 +119,18 @@ where
     }
 }
 
-impl<Block, B, E> sp_domains::GenerateGenesisStateRoot for DomainGenesisBlockBuilder<Block, B, E>
+impl<Block, B, E> sp_domains::GenerateGenesisState for DomainGenesisBlockBuilder<Block, B, E>
 where
     Block: BlockT,
     Block::Hash: Into<H256>,
     B: Backend<Block>,
     E: RuntimeVersionOf + Clone + Send + Sync,
 {
-    fn generate_genesis_state_root(
+    fn generate_genesis_state(
         &self,
         domain_id: DomainId,
         domain_instance_data: DomainInstanceData,
-    ) -> Option<H256> {
-        self.generate_genesis_block(domain_id, domain_instance_data)
-            .map(|genesis_block| *genesis_block.header().state_root())
-            .ok()
-            .map(Into::into)
+    ) -> Option<GenesisState> {
+        todo!("generate the genesis state")
     }
 }

@@ -35,7 +35,7 @@ pub enum Error {
     InsufficientFund,
     DomainNameTooLong,
     BalanceFreeze,
-    FailedToGenerateGenesisStateRoot,
+    FailedToGenerateGenesisState,
 }
 
 #[derive(TypeInfo, Debug, Encode, Decode, Clone, PartialEq, Eq)]
@@ -182,12 +182,12 @@ fn initialize_genesis_receipt<T: Config>(
     raw_genesis_config: Option<Vec<u8>>,
 ) -> Result<ExecutionReceiptOf<T>, Error> {
     let consensus_genesis_hash = frame_system::Pallet::<T>::block_hash(T::BlockNumber::zero());
-    // The `GenesisReceiptExtension` is unavailable during runtime benchmarking, remove once
+    // The `GenesisStateExtension` is unavailable during runtime benchmarking, remove once
     // https://github.com/paritytech/substrate/issues/14733 is resolved.
     let genesis_state_root = if cfg!(feature = "runtime-benchmarks") {
         Default::default()
     } else {
-        generate_genesis_state_root(
+        generate_genesis_state(
             domain_id,
             DomainInstanceData {
                 runtime_type,
@@ -195,7 +195,8 @@ fn initialize_genesis_receipt<T: Config>(
                 raw_genesis_config,
             },
         )
-        .ok_or(Error::FailedToGenerateGenesisStateRoot)?
+        .ok_or(Error::FailedToGenerateGenesisState)?
+        .genesis_state_root
     };
     Ok(ExecutionReceiptOf::<T>::genesis(
         consensus_genesis_hash,
@@ -208,9 +209,9 @@ mod tests {
     use super::*;
     use crate::pallet::{DomainRegistry, NextDomainId, RuntimeRegistry};
     use crate::runtime_registry::RuntimeObject;
-    use crate::tests::{new_test_ext, GenesisStateRootGenerater, Test};
+    use crate::tests::{new_test_ext, GenesisStateGenerater, Test};
     use frame_support::traits::Currency;
-    use sp_domains::GenesisReceiptExtension;
+    use sp_domains::GenesisStateExtension;
     use sp_std::vec;
     use sp_version::RuntimeVersion;
     use std::sync::Arc;
@@ -232,9 +233,7 @@ mod tests {
         };
 
         let mut ext = new_test_ext();
-        ext.register_extension(GenesisReceiptExtension::new(Arc::new(
-            GenesisStateRootGenerater,
-        )));
+        ext.register_extension(GenesisStateExtension::new(Arc::new(GenesisStateGenerater)));
         ext.execute_with(|| {
             assert_eq!(NextDomainId::<Test>::get(), 0.into());
 

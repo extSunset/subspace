@@ -10,8 +10,8 @@ use sp_core::{Get, H256, U256};
 use sp_domains::merkle_tree::MerkleTree;
 use sp_domains::{
     BundleHeader, DomainId, DomainInstanceData, DomainsHoldIdentifier, ExecutionReceipt,
-    GenerateGenesisStateRoot, GenesisReceiptExtension, OpaqueBundle, OperatorId, OperatorPair,
-    ProofOfElection, SealedBundleHeader, StakingHoldIdentifier,
+    GenerateGenesisState, GenesisState, GenesisStateExtension, OpaqueBundle, OperatorId,
+    OperatorPair, ProofOfElection, SealedBundleHeader, StakingHoldIdentifier,
 };
 use sp_runtime::testing::Header;
 use sp_runtime::traits::{AccountIdConversion, BlakeTwo256, Hash as HashT, IdentityLookup};
@@ -219,9 +219,7 @@ pub(crate) fn new_test_ext_with_extensions() -> sp_io::TestExternalities {
     ext.register_extension(sp_core::traits::ReadRuntimeVersionExt::new(
         ReadRuntimeVersion(version.encode()),
     ));
-    ext.register_extension(GenesisReceiptExtension::new(Arc::new(
-        GenesisStateRootGenerater,
-    )));
+    ext.register_extension(GenesisStateExtension::new(Arc::new(GenesisStateGenerater)));
 
     ext
 }
@@ -304,14 +302,14 @@ pub(crate) fn create_dummy_bundle_with_receipts(
     }
 }
 
-pub(crate) struct GenesisStateRootGenerater;
+pub(crate) struct GenesisStateGenerater;
 
-impl GenerateGenesisStateRoot for GenesisStateRootGenerater {
-    fn generate_genesis_state_root(
+impl GenerateGenesisState for GenesisStateGenerater {
+    fn generate_genesis_state(
         &self,
         _domain_id: DomainId,
         _domain_instance_data: DomainInstanceData,
-    ) -> Option<H256> {
+    ) -> Option<GenesisState> {
         Some(Default::default())
     }
 }
