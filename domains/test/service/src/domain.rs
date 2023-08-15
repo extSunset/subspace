@@ -183,7 +183,7 @@ where
                 .await
                 .expect("Failed to get domain instance data")
         };
-        let chain_spec = todo!("derive domain spec from genesis storage");
+        let chain_spec = create_domain_spec(domain_genesis_storage);
         let service_config = node_config(
             domain_id,
             tokio_handle.clone(),

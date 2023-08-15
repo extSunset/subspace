@@ -63,7 +63,8 @@ impl DomainInstanceStarter {
         let domain_config = {
             let chain_id = domain_cli.chain_id(domain_cli.is_dev()?)?;
 
-            let domain_spec = todo!("derive domain spec from genesis storage");
+            let domain_spec =
+                evm_chain_spec::create_domain_spec(chain_id.as_str(), domain_genesis_storage)?;
 
             let service_config = create_configuration::<_, DomainCli, DomainCli>(
                 &domain_cli,
