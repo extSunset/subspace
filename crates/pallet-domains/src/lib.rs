@@ -44,7 +44,7 @@ use sp_core::H256;
 use sp_domains::bundle_producer_election::{is_below_threshold, BundleProducerElectionParams};
 use sp_domains::fraud_proof::FraudProof;
 use sp_domains::{
-    DomainBlockLimit, DomainId, DomainInstanceData, ExecutionReceipt, OpaqueBundle, OperatorId,
+    DomainBlockLimit, DomainGenesisStorage, DomainId, ExecutionReceipt, OpaqueBundle, OperatorId,
     OperatorPublicKey, ProofOfElection, RuntimeId, EMPTY_EXTRINSIC_ROOT,
 };
 use sp_runtime::traits::{BlakeTwo256, CheckedSub, Hash, One, Zero};
@@ -1133,18 +1133,18 @@ impl<T: Config> Pallet<T> {
             .map(|domain_object| domain_object.domain_config.runtime_id)
     }
 
-    pub fn domain_instance_data(
+    pub fn domain_genesis_storage(
         domain_id: DomainId,
-    ) -> Option<(DomainInstanceData, T::BlockNumber)> {
+    ) -> Option<(DomainGenesisStorage, T::BlockNumber)> {
         let domain_obj = DomainRegistry::<T>::get(domain_id)?;
         let (runtime_type, runtime_code) =
             RuntimeRegistry::<T>::get(domain_obj.domain_config.runtime_id)
                 .map(|runtime_object| (runtime_object.runtime_type, runtime_object.code))?;
         Some((
-            DomainInstanceData {
+            DomainGenesisStorage {
                 runtime_type,
                 runtime_code,
-                raw_genesis_config: domain_obj.raw_genesis_config,
+                raw_genesis_storage: domain_obj.raw_genesis_storage,
             },
             domain_obj.created_at,
         ))

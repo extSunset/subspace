@@ -603,6 +603,17 @@ impl DomainsDigestItem for DigestItem {
     }
 }
 
+/// `DomainGenesisStorage` is used to construct the genesis state of the domain instance chain
+/// when initialize the node, this is done in a deterministic way to ensure it is the same state
+/// as the one generated when the domain is instantiate in the consensus chain runtime.
+#[derive(PartialEq, Eq, Clone, Encode, Decode, TypeInfo)]
+pub struct DomainGenesisStorage {
+    pub runtime_type: RuntimeType,
+    pub runtime_code: Vec<u8>,
+    // The `crate::storage::RawGenesis` encoded in json format.
+    pub raw_genesis_storage: Vec<u8>,
+}
+
 /// `DomainInstanceData` is used to construct `RuntimeGenesisConfig` which will be further used
 /// to construct the genesis block
 #[derive(PartialEq, Eq, Clone, Encode, Decode, TypeInfo)]
@@ -757,7 +768,7 @@ sp_api::decl_runtime_apis! {
         fn runtime_id(domain_id: DomainId) -> Option<RuntimeId>;
 
         /// Returns the domain instance data for given `domain_id`.
-        fn domain_instance_data(domain_id: DomainId) -> Option<(DomainInstanceData, NumberFor<Block>)>;
+        fn domain_genesis_storage(domain_id: DomainId) -> Option<(DomainGenesisStorage, NumberFor<Block>)>;
 
         /// Returns the current timestamp at given height.
         fn timestamp() -> Moment;

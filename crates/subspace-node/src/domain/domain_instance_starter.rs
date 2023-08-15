@@ -42,7 +42,7 @@ impl DomainInstanceStarter {
         bootstrap_result: BootstrapResult<CBlock>,
     ) -> std::result::Result<(), Box<dyn std::error::Error>> {
         let BootstrapResult {
-            domain_instance_data,
+            domain_genesis_storage,
             domain_created_at,
             imported_block_notification_stream,
         } = bootstrap_result;
@@ -58,16 +58,12 @@ impl DomainInstanceStarter {
             select_chain,
         } = self;
 
-        let runtime_type = domain_instance_data.runtime_type.clone();
+        let runtime_type = domain_genesis_storage.runtime_type.clone();
         let domain_id = domain_cli.domain_id;
         let domain_config = {
             let chain_id = domain_cli.chain_id(domain_cli.is_dev()?)?;
 
-            let domain_spec = evm_chain_spec::create_domain_spec(
-                domain_id,
-                chain_id.as_str(),
-                domain_instance_data,
-            )?;
+            let domain_spec = todo!("derive domain spec from genesis storage");
 
             let service_config = create_configuration::<_, DomainCli, DomainCli>(
                 &domain_cli,

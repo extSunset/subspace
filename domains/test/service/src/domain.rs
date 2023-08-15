@@ -173,7 +173,7 @@ where
         mock_consensus_node: &mut MockConsensusNode,
     ) -> Self {
         let BootstrapResult {
-            domain_instance_data,
+            domain_genesis_storage,
             domain_created_at,
             imported_block_notification_stream,
         } = {
@@ -183,7 +183,7 @@ where
                 .await
                 .expect("Failed to get domain instance data")
         };
-        let chain_spec = create_domain_spec(domain_id, domain_instance_data);
+        let chain_spec = todo!("derive domain spec from genesis storage");
         let service_config = node_config(
             domain_id,
             tokio_handle.clone(),

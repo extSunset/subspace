@@ -13,9 +13,10 @@ use frame_support::weights::Weight;
 use frame_support::{ensure, PalletError};
 use scale_info::TypeInfo;
 use sp_core::Get;
-use sp_domains::domain::generate_genesis_state_root;
+use sp_domains::domain::generate_genesis_state;
 use sp_domains::{
-    DomainId, DomainInstanceData, DomainsDigestItem, ReceiptHash, RuntimeId, RuntimeType,
+    DomainId, DomainInstanceData, DomainsDigestItem, GenesisState, ReceiptHash, RuntimeId,
+    RuntimeType,
 };
 use sp_runtime::traits::{CheckedAdd, Zero};
 use sp_runtime::DigestItem;
@@ -65,12 +66,12 @@ pub struct DomainObject<Number, AccountId> {
     pub genesis_receipt_hash: ReceiptHash,
     /// The domain config.
     pub domain_config: DomainConfig,
-    /// The genesis config of the domain, encoded in json format.
+    /// The genesis storage of the domain, value of `sp_domains::storage::RawGenesis`
+    /// encoded in json format.
     //
-    /// NOTE: the WASM code in the `system-pallet` genesis config should be empty to avoid
-    /// redundancy with the `RuntimeRegistry`. Currently, this value only set to `Some` for
-    /// the genesis domain instance.
-    pub raw_genesis_config: Option<Vec<u8>>,
+    /// NOTE: the WASM code in the genesis storage is removed to avoid redundancy with
+    /// the `RuntimeRegistry`.
+    pub raw_genesis_storage: Vec<u8>,
 }
 
 pub(crate) fn can_instantiate_domain<T: Config>(
@@ -125,15 +126,23 @@ pub(crate) fn do_instantiate_domain<T: Config>(
 
     let domain_id = NextDomainId::<T>::get();
 
-    let genesis_receipt = {
+    let GenesisState {
+        genesis_state_root,
+        raw_genesis_storage,
+    } = {
         let runtime_obj = RuntimeRegistry::<T>::get(domain_config.runtime_id)
             .expect("Runtime object must exist as checked in `can_instantiate_domain`; qed");
-        initialize_genesis_receipt::<T>(
+        initialize_genesis_state(
             domain_id,
             runtime_obj.runtime_type,
             runtime_obj.code,
-            raw_genesis_config.clone(),
+            raw_genesis_config,
         )?
+    };
+
+    let genesis_receipt = {
+        let consensus_genesis_hash = frame_system::Pallet::<T>::block_hash(T::BlockNumber::zero());
+        ExecutionReceiptOf::<T>::genesis(consensus_genesis_hash, genesis_state_root.into())
     };
     let genesis_receipt_hash = genesis_receipt.hash();
 
@@ -142,7 +151,7 @@ pub(crate) fn do_instantiate_domain<T: Config>(
         created_at,
         genesis_receipt_hash,
         domain_config,
-        raw_genesis_config,
+        raw_genesis_storage,
     };
     DomainRegistry::<T>::insert(domain_id, domain_obj);
 
@@ -175,17 +184,16 @@ pub(crate) fn do_instantiate_domain<T: Config>(
     Ok(domain_id)
 }
 
-fn initialize_genesis_receipt<T: Config>(
+fn initialize_genesis_state(
     domain_id: DomainId,
     runtime_type: RuntimeType,
     runtime_code: Vec<u8>,
     raw_genesis_config: Option<Vec<u8>>,
-) -> Result<ExecutionReceiptOf<T>, Error> {
-    let consensus_genesis_hash = frame_system::Pallet::<T>::block_hash(T::BlockNumber::zero());
+) -> Result<GenesisState, Error> {
     // The `GenesisStateExtension` is unavailable during runtime benchmarking, remove once
     // https://github.com/paritytech/substrate/issues/14733 is resolved.
-    let genesis_state_root = if cfg!(feature = "runtime-benchmarks") {
-        Default::default()
+    if cfg!(feature = "runtime-benchmarks") {
+        Ok(Default::default())
     } else {
         generate_genesis_state(
             domain_id,
@@ -195,13 +203,8 @@ fn initialize_genesis_receipt<T: Config>(
                 raw_genesis_config,
             },
         )
-        .ok_or(Error::FailedToGenerateGenesisState)?
-        .genesis_state_root
-    };
-    Ok(ExecutionReceiptOf::<T>::genesis(
-        consensus_genesis_hash,
-        genesis_state_root.into(),
-    ))
+        .ok_or(Error::FailedToGenerateGenesisState)
+    }
 }
 
 #[cfg(test)]

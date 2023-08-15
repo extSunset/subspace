@@ -61,7 +61,7 @@ use sp_core::crypto::{ByteArray, KeyTypeId};
 use sp_core::{OpaqueMetadata, H256};
 use sp_domains::bundle_producer_election::BundleProducerElectionParams;
 use sp_domains::{
-    DomainId, DomainInstanceData, DomainsHoldIdentifier, OperatorId, OperatorPublicKey,
+    DomainGenesisStorage, DomainId, DomainsHoldIdentifier, OperatorId, OperatorPublicKey,
     StakingHoldIdentifier,
 };
 use sp_runtime::traits::{AccountIdConversion, AccountIdLookup, BlakeTwo256, NumberFor};
@@ -881,8 +881,8 @@ impl_runtime_apis! {
             Domains::runtime_id(domain_id)
         }
 
-        fn domain_instance_data(domain_id: DomainId) -> Option<(DomainInstanceData, NumberFor<Block>)> {
-            Domains::domain_instance_data(domain_id)
+        fn domain_genesis_storage(domain_id: DomainId) -> Option<(DomainGenesisStorage, NumberFor<Block>)> {
+            Domains::domain_genesis_storage(domain_id)
         }
 
         fn timestamp() -> Moment{

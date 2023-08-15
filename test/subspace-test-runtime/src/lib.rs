@@ -53,7 +53,7 @@ use sp_domains::bundle_producer_election::BundleProducerElectionParams;
 use sp_domains::fraud_proof::FraudProof;
 use sp_domains::transaction::PreValidationObject;
 use sp_domains::{
-    DomainId, DomainInstanceData, DomainsHoldIdentifier, ExecutionReceipt, OpaqueBundle,
+    DomainGenesisStorage, DomainId, DomainsHoldIdentifier, ExecutionReceipt, OpaqueBundle,
     OpaqueBundles, OperatorId, OperatorPublicKey, StakingHoldIdentifier,
 };
 use sp_runtime::traits::{
@@ -1227,8 +1227,8 @@ impl_runtime_apis! {
             Domains::runtime_id(domain_id)
         }
 
-        fn domain_instance_data(domain_id: DomainId) -> Option<(DomainInstanceData, NumberFor<Block>)> {
-            Domains::domain_instance_data(domain_id)
+        fn domain_genesis_storage(domain_id: DomainId) -> Option<(DomainGenesisStorage, NumberFor<Block>)> {
+            Domains::domain_genesis_storage(domain_id)
         }
 
         fn timestamp() -> Moment{
