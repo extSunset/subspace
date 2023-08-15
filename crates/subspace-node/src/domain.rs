@@ -25,9 +25,12 @@ use sc_client_api::Backend;
 use sc_executor::{NativeExecutionDispatch, RuntimeVersionOf};
 use sc_service::{BuildGenesisBlock, GenesisBlockBuilder};
 use sp_core::crypto::AccountId32;
+use sp_core::storage::Storage;
 use sp_core::{ByteArray, H160, H256};
-use sp_domains::{DomainId, DomainInstanceData, RuntimeType};
+use sp_domains::storage::RawGenesis;
+use sp_domains::{DomainId, DomainInstanceData, GenesisState, RuntimeType};
 use sp_runtime::traits::{Block as BlockT, Convert, Header as HeaderT};
+use sp_runtime::BuildStorage;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
@@ -69,6 +72,7 @@ pub struct DomainGenesisBlockBuilder<Block, B, E> {
 impl<Block, B, E> DomainGenesisBlockBuilder<Block, B, E>
 where
     Block: BlockT,
+    Block::Hash: Into<H256>,
     B: Backend<Block>,
     E: RuntimeVersionOf + Clone,
 {
@@ -81,18 +85,17 @@ where
         }
     }
 
-    /// Constructs the genesis domain block from a serialized runtime genesis config.
-    pub fn generate_genesis_block(
-        &self,
+    // Constructs the genesis storage from a serialized runtime genesis config.
+    fn generate_genesis_storage(
         domain_id: DomainId,
         domain_instance_data: DomainInstanceData,
-    ) -> sp_blockchain::Result<Block> {
+    ) -> sp_blockchain::Result<Storage> {
         let DomainInstanceData {
             runtime_type,
             runtime_code,
             raw_genesis_config,
         } = domain_instance_data;
-        let domain_genesis_block_builder = match runtime_type {
+        match runtime_type {
             RuntimeType::Evm => {
                 let mut runtime_cfg = match raw_genesis_config {
                     Some(raw_genesis_config) => serde_json::from_slice(&raw_genesis_config)
@@ -105,17 +108,35 @@ where
                 };
                 runtime_cfg.system.code = runtime_code;
                 runtime_cfg.self_domain_id.domain_id = Some(domain_id);
-                GenesisBlockBuilder::new(
-                    &runtime_cfg,
-                    false,
-                    self.backend.clone(),
-                    self.executor.clone(),
-                )?
+
+                runtime_cfg
+                    .build_storage()
+                    .map_err(sp_blockchain::Error::Storage)
             }
+        }
+    }
+
+    // Constructs the `GenesisState` from the genesis storage.
+    fn generate_genesis_state(&self, storage: Storage) -> sp_blockchain::Result<GenesisState> {
+        // Construct the genesis block and get the genesis state root
+        let genesis_state_root = {
+            let domain_genesis_block_builder = GenesisBlockBuilder::new(
+                &storage,
+                false,
+                self.backend.clone(),
+                self.executor.clone(),
+            )?;
+            let (genesis_block, _) = domain_genesis_block_builder.build_genesis_block()?;
+            (*genesis_block.header().state_root()).into()
         };
-        domain_genesis_block_builder
-            .build_genesis_block()
-            .map(|(genesis_block, _)| genesis_block)
+
+        let raw_genesis_storage = serde_json::to_vec(&RawGenesis::from_storage(storage))
+            .expect("Raw genesis serialization never fails; qed");
+
+        Ok(GenesisState {
+            genesis_state_root,
+            raw_genesis_storage,
+        })
     }
 }
 
@@ -131,6 +152,14 @@ where
         domain_id: DomainId,
         domain_instance_data: DomainInstanceData,
     ) -> Option<GenesisState> {
-        todo!("generate the genesis state")
+        match Self::generate_genesis_storage(domain_id, domain_instance_data)
+            .and_then(|gs| self.generate_genesis_state(gs))
+        {
+            Ok(gs) => Some(gs),
+            Err(err) => {
+                log::warn!("Failed to generated genesis state, error {err:?}");
+                None
+            }
+        }
     }
 }
