@@ -20,6 +20,8 @@
 pub mod bundle_producer_election;
 pub mod fraud_proof;
 pub mod merkle_tree;
+#[cfg(feature = "std")]
+pub mod storage;
 #[cfg(test)]
 mod tests;
 pub mod transaction;
