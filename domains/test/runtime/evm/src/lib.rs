@@ -179,7 +179,10 @@ pub const VERSION: RuntimeVersion = RuntimeVersion {
     spec_name: create_runtime_str!("subspace-evm-domain"),
     impl_name: create_runtime_str!("subspace-evm-domain"),
     authoring_version: 0,
-    spec_version: 0,
+    // Increase the `spec_version` by 1 compare to the production runtime, because the consensus
+    // chain is compile and use the production runtime during domain instantiation thus this can
+    // simulate the situation where the domain runtime is upgraded after domain instantiation.
+    spec_version: 1,
     impl_version: 0,
     apis: RUNTIME_API_VERSIONS,
     transaction_version: 0,
