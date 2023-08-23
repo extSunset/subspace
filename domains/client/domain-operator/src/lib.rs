@@ -77,6 +77,7 @@ mod parent_chain;
 mod tests;
 mod utils;
 
+pub use self::aux_schema::{load_execution_receipt, load_execution_receipt_by_domain_hash};
 pub use self::bootstrapper::{BootstrapResult, Bootstrapper};
 pub use self::operator::Operator;
 pub use self::parent_chain::DomainParentChain;

@@ -156,7 +156,7 @@ where
 }
 
 /// Load the execution receipt for given domain block hash.
-pub(super) fn load_execution_receipt_by_domain_hash<Backend, Block, CBlock>(
+pub fn load_execution_receipt_by_domain_hash<Backend, Block, CBlock>(
     backend: &Backend,
     domain_hash: Block::Hash,
 ) -> ClientResult<Option<ExecutionReceiptFor<Block, CBlock>>>
@@ -175,7 +175,7 @@ where
 }
 
 /// Load the execution receipt for given consensus block hash.
-pub(super) fn load_execution_receipt<Backend, Block, CBlock>(
+pub fn load_execution_receipt<Backend, Block, CBlock>(
     backend: &Backend,
     consensus_block_hash: CBlock::Hash,
 ) -> ClientResult<Option<ExecutionReceiptFor<Block, CBlock>>>
