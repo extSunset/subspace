@@ -5,10 +5,11 @@ mod ss58;
 mod utils;
 
 use bytesize::ByteSize;
-use clap::{Parser, ValueHint};
+use clap::builder::PossibleValuesParser;
+use clap::{Parser, Subcommand, ValueHint};
 use ss58::parse_ss58_reward_address;
 use std::fs;
-use std::num::NonZeroU8;
+use std::num::{NonZeroU16, NonZeroU8};
 use std::path::PathBuf;
 use std::str::FromStr;
 use subspace_core_primitives::PublicKey;
@@ -129,6 +130,88 @@ struct DsnArgs {
     external_addresses: Vec<Multiaddr>,
 }
 
+#[derive(Debug, Parser)]
+struct BenchmarkArgs {
+    /// Single farm to run benchmark on.
+    base_path: PathBuf,
+    /// Amount of sectors from plot to use for this benchmark.
+    #[arg(long)]
+    sector_count: Option<NonZeroU16>,
+    /// Changes the size of the sample for this benchmark.
+    #[arg(long, default_value_t = 10, value_parser = sample_size_parser)]
+    sample_size: usize,
+    /// Number of resamples to use for the bootstrap for this benchmark.
+    #[arg(long, default_value_t = 100_000, value_parser = resamples_count_parser)]
+    resamples_count: usize,
+    #[arg(long, default_value_t = 0.01, value_parser = positive_f64_parser)]
+    noise_threshold: f64,
+    /// Changes the confidence level for this benchmark.
+    /// The confidence level is the desired probability that the true runtime lies within the estimated confidence interval.
+    /// Can be in range (0..1).
+    #[arg(long, default_value_t = 0.95, value_parser = percent_f64_parser)]
+    confidence_level: f64,
+    /// Sets the probability that two identical code measurements are considered 'different' due to measurement noise.
+    /// Lower values increase robustness against noise but may miss small true performance changes;
+    /// higher values detect minute changes but may report more noise. Adjust based on desired noise sensitivity.
+    /// Can be in range (0..1).
+    #[arg(long, default_value_t = 0.05, value_parser = percent_f64_parser)]
+    significance_level: f64,
+    /// Set the sampling mode for this benchmark.
+    /// Auto: default, criterion chooses the best method, suitable for most benchmarks.
+    /// Linear: scales iteration count linearly, suitable for most benchmarks but can be slow for lengthy ones.
+    /// Flat: same iteration count for all samples, not recommended due to reduced statistical precision, but faster for very long benchmarks.
+    #[arg(long, default_value = "auto", value_parser = PossibleValuesParser::new(["auto", "linear", "flat"]))]
+    sampling_mode: String,
+}
+
+fn sample_size_parser(s: &str) -> anyhow::Result<usize> {
+    let sample_size = usize::from_str(s)?;
+
+    if sample_size < 10 {
+        return Err(anyhow::anyhow!("The sample size cannot be less than 10."));
+    }
+
+    Ok(sample_size)
+}
+
+fn resamples_count_parser(s: &str) -> anyhow::Result<usize> {
+    let resamples_count = usize::from_str(s)?;
+
+    if resamples_count < 1 {
+        return Err(anyhow::anyhow!(
+            "The resamples count cannot be less than 1."
+        ));
+    }
+
+    Ok(resamples_count)
+}
+
+fn positive_f64_parser(s: &str) -> anyhow::Result<f64> {
+    let positive_f64 = f64::from_str(s)?;
+
+    if positive_f64 <= 0.0 {
+        return Err(anyhow::anyhow!("The value cannot be less than zero."));
+    }
+
+    Ok(positive_f64)
+}
+
+fn percent_f64_parser(s: &str) -> anyhow::Result<f64> {
+    let percent_f64 = f64::from_str(s)?;
+
+    if percent_f64 > 1.0 || percent_f64 < 0.0 {
+        return Err(anyhow::anyhow!("Tte value should be in range (0..1)."));
+    }
+
+    Ok(percent_f64)
+}
+
+#[derive(Debug, Subcommand)]
+enum BenchCommand {
+    /// Run sector audit benchmark.
+    Audit(BenchmarkArgs),
+}
+
 #[derive(Debug, Clone)]
 struct DiskFarm {
     /// Path to directory where data is stored.
@@ -224,6 +307,12 @@ enum Command {
         ///   /path/to/directory
         disk_farms: Vec<PathBuf>,
     },
+    /// Runs benchmarks of the farmer's components.
+    Bench {
+        /// Benchmark to run.
+        #[command(subcommand)]
+        subcommand: BenchCommand,
+    },
 }
 
 #[tokio::main]
@@ -274,6 +363,11 @@ async fn main() -> anyhow::Result<()> {
         Command::Scrub { disk_farms } => {
             commands::scrub(&disk_farms);
         }
+        Command::Bench { subcommand } => match subcommand {
+            BenchCommand::Audit(benchmark_args) => {
+                commands::bench::audit(benchmark_args).unwrap();
+            }
+        },
     }
     Ok(())
 }

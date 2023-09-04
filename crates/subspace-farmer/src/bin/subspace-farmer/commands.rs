@@ -1,3 +1,4 @@
+pub(crate) mod bench;
 mod farm;
 mod info;
 mod scrub;

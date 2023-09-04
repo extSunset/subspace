@@ -59,8 +59,10 @@ use ulid::Ulid;
 // usize depending on chain parameters
 const_assert!(std::mem::size_of::<usize>() >= std::mem::size_of::<u64>());
 
+// TODO: Create a better abstraction.
 /// Reserve 1M of space for plot metadata (for potential future expansion)
-const RESERVED_PLOT_METADATA: u64 = 1024 * 1024;
+#[doc(hidden)]
+pub const RESERVED_PLOT_METADATA: u64 = 1024 * 1024;
 /// Reserve 1M of space for farm info (for potential future expansion)
 const RESERVED_FARM_INFO: u64 = 1024 * 1024;
 
@@ -243,15 +245,17 @@ pub enum SingleDiskFarmSummary {
     },
 }
 
+// TODO: Create a better abstraction.
+#[doc(hidden)]
 #[derive(Debug, Encode, Decode)]
-struct PlotMetadataHeader {
-    version: u8,
-    plotted_sector_count: SectorIndex,
+pub struct PlotMetadataHeader {
+    pub version: u8,
+    pub plotted_sector_count: SectorIndex,
 }
 
 impl PlotMetadataHeader {
     #[inline]
-    fn encoded_size() -> usize {
+    pub fn encoded_size() -> usize {
         let default = PlotMetadataHeader {
             version: 0,
             plotted_sector_count: 0,
