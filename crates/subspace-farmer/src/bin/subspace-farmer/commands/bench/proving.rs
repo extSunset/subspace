@@ -28,6 +28,7 @@ pub(crate) fn proving(benchmark_args: BenchmarkArgs) -> Result<()> {
     let BenchmarkArgs {
         base_path,
         sector_count,
+	parallel,
         sample_size,
         resamples_count,
         noise_threshold,

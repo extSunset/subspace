@@ -12,11 +12,13 @@ use subspace_farmer::single_disk_farm::{
 use subspace_farmer_components::auditing::audit_sector;
 use subspace_farmer_components::sector::{sector_size, SectorMetadataChecksummed};
 use tracing::{debug, error, info, warn};
+use rayon::prelude::*;
 
 pub(crate) fn audit(benchmark_args: BenchmarkArgs) -> Result<()> {
     let BenchmarkArgs {
         base_path,
         sector_count,
+	parallel,
         sample_size,
         resamples_count,
         noise_threshold,
@@ -224,23 +226,34 @@ pub(crate) fn audit(benchmark_args: BenchmarkArgs) -> Result<()> {
     group.sampling_mode(sampling_mode);
     group.bench_function("disk", move |b| {
         b.iter_custom(|iters| {
+	    let action = |(sector_index, sector)| {
+		audit_sector(
+                    black_box(&public_key),
+                    black_box(sector_index as SectorIndex),
+                    black_box(&global_challenge),
+                    black_box(solution_range),
+                    black_box(sector),
+                    black_box(&(sectors_metadata[sector_index])),
+                );
+	    };
             let start = Instant::now();
             for _i in 0..iters {
-                for (sector_index, sector) in plot_mmap
-                    .chunks_exact(sector_size)
-                    .take(sector_count.into())
-                    .enumerate()
-                    .map(|(sector_index, sector)| (sector_index, sector))
-                {
-                    audit_sector(
-                        black_box(&public_key),
-                        black_box(sector_index as SectorIndex),
-                        black_box(&global_challenge),
-                        black_box(solution_range),
-                        black_box(sector),
-                        black_box(&(sectors_metadata[sector_index])),
-                    );
-                }
+		if parallel {
+                    let process = plot_mmap
+			.chunks_exact(sector_size)
+			.take(sector_count.into())
+			.enumerate()
+			.par_bridge();
+		    
+		    process.for_each(action);
+                } else {
+		    let process = plot_mmap
+			.chunks_exact(sector_size)
+			.take(sector_count.into())
+			.enumerate();
+
+		    process.for_each(action);
+		}
             }
             start.elapsed()
         });

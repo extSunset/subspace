@@ -137,6 +137,8 @@ struct BenchmarkArgs {
     /// Amount of sectors from plot to use for this benchmark.
     #[arg(long)]
     sector_count: Option<NonZeroU16>,
+    #[arg(long, default_value_t = false)]
+    parallel: bool,
     /// Changes the size of the sample for this benchmark.
     #[arg(long, default_value_t = 10, value_parser = sample_size_parser)]
     sample_size: usize,
