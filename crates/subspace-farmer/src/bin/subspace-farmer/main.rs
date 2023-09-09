@@ -210,6 +210,8 @@ fn percent_f64_parser(s: &str) -> anyhow::Result<f64> {
 enum BenchCommand {
     /// Run sector audit benchmark.
     Audit(BenchmarkArgs),
+    /// Run proving benchmark.
+    Proving(BenchmarkArgs),
 }
 
 #[derive(Debug, Clone)]
@@ -366,6 +368,9 @@ async fn main() -> anyhow::Result<()> {
         Command::Bench { subcommand } => match subcommand {
             BenchCommand::Audit(benchmark_args) => {
                 commands::bench::audit(benchmark_args).unwrap();
+            }
+            BenchCommand::Proving(benchmark_args) => {
+                commands::bench::proving(benchmark_args).unwrap();
             }
         },
     }
