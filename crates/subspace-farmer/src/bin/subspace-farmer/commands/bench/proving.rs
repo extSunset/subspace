@@ -21,6 +21,7 @@ use subspace_farmer_components::sector::{sector_size, SectorMetadataChecksummed}
 use subspace_proof_of_space::chia::ChiaTable;
 use subspace_proof_of_space::Table;
 use tracing::{debug, error, info, trace, warn};
+use rayon::prelude::*;
 
 type PosTable = ChiaTable;
 
@@ -291,6 +292,7 @@ pub(crate) fn proving(benchmark_args: BenchmarkArgs) -> Result<()> {
 
     let solution_candidates = plot_mmap
         .chunks_exact(sector_size)
+        .take(sector_count.into())
         .enumerate()
         .map(|(sector_index, sector)| {
             trace!("Processing sector {}", sector_index);
@@ -314,20 +316,41 @@ pub(crate) fn proving(benchmark_args: BenchmarkArgs) -> Result<()> {
         b.iter_custom(|iters| {
             let start = Instant::now();
             for _i in 0..iters {
-                for solution_candidates in solution_candidates.clone() {
-                    solution_candidates
-                        .into_iter::<_, PosTable>(
-                            black_box(&public_key),
-                            black_box(&kzg),
-                            black_box(&erasure_coding),
-                            black_box(&mut table_generator),
-                        )
-                        .unwrap()
+		if parallel {
+                    solution_candidates.clone().par_iter().for_each(|solution_candidates| {
+			let solution_candidates = solution_candidates.clone();
+
+			let mut table_generator = PosTable::generator();
+			
+			solution_candidates
+                            .into_iter::<_, PosTable>(
+				black_box(&public_key),
+				black_box(&kzg),
+				black_box(&erasure_coding),
+				black_box(&mut table_generator),
+                            )
+                            .unwrap()
                         // Process just one solution
-                        .next()
-                        .unwrap()
-                        .unwrap();
-                }
+                            .next()
+                            .unwrap()
+                            .unwrap();
+                    });
+		} else {
+		    for solution_candidates in solution_candidates.clone() {
+			solution_candidates
+                            .into_iter::<_, PosTable>(
+				black_box(&public_key),
+				black_box(&kzg),
+				black_box(&erasure_coding),
+				black_box(&mut table_generator),
+                            )
+                            .unwrap()
+                        // Process just one solution
+                            .next()
+                            .unwrap()
+                            .unwrap();
+		    }
+		}
             }
             start.elapsed()
         });
